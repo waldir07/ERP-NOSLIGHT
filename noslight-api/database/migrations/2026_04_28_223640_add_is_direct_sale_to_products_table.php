@@ -1,0 +1,23 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up()
+    {
+        Schema::table('products', function (Blueprint $table) {
+            // Esta es la línea clave que crea la columna
+            $table->boolean('is_direct_sale')->default(false)->after('is_raw');
+        });
+    }
+
+    public function down()
+    {
+        Schema::table('products', function (Blueprint $table) {
+            $table->dropColumn('is_direct_sale');
+        });
+    }
+};

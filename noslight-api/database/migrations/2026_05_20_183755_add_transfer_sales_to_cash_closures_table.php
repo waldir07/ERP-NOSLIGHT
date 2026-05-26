@@ -1,0 +1,24 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up()
+    {
+        Schema::table('cash_closures', function (Blueprint $table) {
+            $table->decimal('transfer_sales', 10, 2)
+                ->default(0)
+                ->after('yape_sales');
+        });
+    }
+
+    public function down()
+    {
+        Schema::table('cash_closures', function (Blueprint $table) {
+            $table->dropColumn('transfer_sales');
+        });
+    }
+};
