@@ -12,14 +12,14 @@ return new class extends Migration
     // database/migrations/xxxx_create_transfers_table.php
     public function up()
     {
-        Schema::create('transfers', function (Blueprint $table) {
-            $table->id();
-            $table->string('transfer_number')->unique();
-            $table->foreignId('sender_id')->constrained('users'); // Willy (Warehouse)
-            $table->foreignId('receiver_id')->nullable()->constrained('users'); // Quién recibe (Store)
-            $table->enum('status', ['pending', 'completed', 'cancelled'])->default('pending');
-            $table->timestamps();
-        });
+       // Schema::create('transfers', function (Blueprint $table) {
+           // $table->id();
+            //$table->string('transfer_number')->unique();
+            //$table->foreignId('sender_id')->constrained('users'); // Willy (Warehouse)
+            //$table->foreignId('receiver_id')->nullable()->constrained('users'); // Quién recibe (Store)
+            //$table->enum('status', ['pending', 'completed', 'cancelled'])->default('pending');
+            //$table->timestamps();
+       // });
     }
 
     /**
