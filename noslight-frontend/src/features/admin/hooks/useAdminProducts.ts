@@ -80,6 +80,7 @@ export const useAdminProducts = (page?: number, search?: string) => {
         is_raw: Boolean(product.is_raw),
         is_direct_sale: Boolean(product.is_direct_sale),
       }));
+
       
 
       // Si es paginado, retornamos la estructura de objeto que espera tu nueva grilla

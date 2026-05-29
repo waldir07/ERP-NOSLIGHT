@@ -70,6 +70,7 @@ class ProductController extends Controller
         }
 
 
+
         // 2. CORRECCIÓN ULTRA SEGURA: Solo si el frontend envía explícitamente '?paginated=true'
         // Usamos 'has' y validamos texto plano para evitar falsos positivos en otras vistas
         if ($request->has('paginated') && $request->input('paginated') == 'true') {

@@ -31,7 +31,7 @@ export default function AdminProducts() {
   const productsList: Product[] = data && typeof data === 'object' && 'products' in data ? data.products : (Array.isArray(data) ? data : []);
   const lastPage = data && typeof data === 'object' && 'lastPage' in data ? data.lastPage : 1;
   const totalProducts = data && typeof data === 'object' && 'total' in data ? data.total : productsList.length;
-  
+
 
   const createMutation = useCreateProduct();
   const updateMutation = useUpdateProduct();
@@ -141,6 +141,7 @@ export default function AdminProducts() {
           )}
         </div>
       )}
+      
 
       {/* Lista de Productos */}
       {view === "list" && (
