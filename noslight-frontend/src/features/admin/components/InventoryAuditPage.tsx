@@ -25,7 +25,7 @@ export default function InventoryAuditPage() {
   const loadUnifiedStock = async () => {
     try {
       const token = localStorage.getItem("noslight_token");
-      const res = await fetch("import.meta.env.VITE_API_URL/api/admin/inventory/unified-list", {
+      const res = await fetch("/api/admin/inventory/unified-list", {
         headers: { "Authorization": `Bearer ${token}` }
       });
       if (res.ok) {
@@ -58,7 +58,7 @@ export default function InventoryAuditPage() {
 
     try {
       const token = localStorage.getItem("noslight_token");
-      const res = await fetch("import.meta.env.VITE_API_URL/api/admin/inventory/inject-row", {
+      const res = await fetch("/api/admin/inventory/inject-row", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

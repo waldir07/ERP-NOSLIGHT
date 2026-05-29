@@ -120,7 +120,7 @@ class InventoryAdjustmentController extends Controller
         $warehouses = \App\Models\Warehouse::all()->keyBy('id');
 
         $almacenRaw = $warehouses->get(1);
-        $tienda = $warehouses->get(2);
+        $tienda = $warehouses->get(2);  
 
         $result = [];
 
