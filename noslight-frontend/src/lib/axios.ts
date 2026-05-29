@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'import.meta.env.VITE_API_URL', // ← cambia a tu URL real de Laravel (puede ser /api si usas proxy)
+  baseURL: import.meta.env.VITE_API_URL, // ← cambia a tu URL real de Laravel (puede ser /api si usas proxy)
   headers: {
     'Content-Type': 'application/json',
     Accept: 'application/json',

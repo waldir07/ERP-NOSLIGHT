@@ -43,7 +43,7 @@ export default function ExpensesPage() {
         if (search) params.append('search', search);
 
         try {
-            const res = await fetch(`import.meta.env.VITE_API_URL/api/expenses?${params.toString()}`, {
+            const res = await fetch(`${import.meta.env.VITE_API_URL}/api/expenses?${params.toString()}`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
             const data = await res.json();
@@ -86,7 +86,7 @@ export default function ExpensesPage() {
 
         setSubmitting(true);
         try {
-            await fetch("import.meta.env.VITE_API_URL/api/expenses", {
+            await fetch(import.meta.env.VITE_API_URL + "/api/expenses", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",

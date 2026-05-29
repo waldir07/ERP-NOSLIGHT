@@ -57,7 +57,7 @@ export default function NewSalePage() {
     setIsLoading(true);
     try {
       const token = localStorage.getItem("noslight_token");
-      const response = await fetch("import.meta.env.VITE_API_URL/api/store/stock", {
+      const response = await fetch(import.meta.env.VITE_API_URL + "/api/store/stock", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (response.ok) {
@@ -420,7 +420,7 @@ export default function NewSalePage() {
             };
             try {
               const token = localStorage.getItem("noslight_token");
-              const res = await fetch("import.meta.env.VITE_API_URL/api/sales", {
+              const res = await fetch(import.meta.env.VITE_API_URL + "/api/sales", {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",

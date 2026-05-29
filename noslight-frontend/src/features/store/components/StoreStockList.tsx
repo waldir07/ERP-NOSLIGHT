@@ -37,7 +37,7 @@ export default function StoreStockList() {
       try {
         const token = localStorage.getItem("noslight_token");
 
-        const response = await fetch("import.meta.env.VITE_API_URL/api/store/stock", {
+        const response = await fetch(import.meta.env.VITE_API_URL + "/api/store/stock", {
           headers: {
             Accept: "application/json",
             Authorization: `Bearer ${token}`,

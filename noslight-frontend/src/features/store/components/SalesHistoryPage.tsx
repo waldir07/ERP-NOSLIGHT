@@ -92,7 +92,7 @@ export const SalesHistoryPage = () => {
       });
 
       // 3. Hacemos el fetch nativo apuntando directo al puerto 8000 con los headers correctos
-      const response = await fetch(`import.meta.env.VITE_API_URL/api/sales?${params.toString()}`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/sales?${params.toString()}`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -355,7 +355,7 @@ export const SalesHistoryPage = () => {
     setIsSearchingProducts(true);
     try {
       const token = localStorage.getItem("noslight_token");
-      const res = await fetch(`import.meta.env.VITE_API_URL/api/products?search=${query}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/products?search=${query}`, {
         headers: { "Authorization": `Bearer ${token}` }
       });
 
@@ -497,7 +497,7 @@ export const SalesHistoryPage = () => {
     setIsProcessingExchange(true);
     try {
       const token = localStorage.getItem("noslight_token");
-      const res = await fetch("import.meta.env.VITE_API_URL/api/exchanges", {
+      const res = await fetch(import.meta.env.VITE_API_URL + "/api/exchanges", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
