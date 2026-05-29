@@ -97,7 +97,7 @@ export default function CreditsPage() {
     setIsLoadingPending(true);
     try {
       const token = localStorage.getItem("noslight_token");
-      const res = await fetch("import.meta.env.VITE_API_URL/api/credits/pending", {
+      const res = await fetch(import.meta.env.VITE_API_URL + "/api/credits/pending", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setPendingSales(await res.json());
@@ -113,7 +113,7 @@ export default function CreditsPage() {
     setIsLoadingAccounts(true);
     try {
       const token = localStorage.getItem("noslight_token");
-      const res = await fetch("import.meta.env.VITE_API_URL/api/credits/accounts", {
+      const res = await fetch(import.meta.env.VITE_API_URL + "/api/credits/accounts", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setAccounts(await res.json());
@@ -186,7 +186,7 @@ export default function CreditsPage() {
     try {
       const token = localStorage.getItem("noslight_token");
       const res = await fetch(
-        `import.meta.env.VITE_API_URL/api/credits/approve-group`,
+        `${import.meta.env.VITE_API_URL}/api/credits/approve-group`,
         {
           method: "POST",
           headers: {
@@ -250,7 +250,7 @@ export default function CreditsPage() {
     try {
       const token = localStorage.getItem("noslight_token");
       const res = await fetch(
-        `import.meta.env.VITE_API_URL/api/credits/customers/${selectedAccount.id}/payments`,
+        `${import.meta.env.VITE_API_URL}/api/credits/customers/${selectedAccount.id}/payments`,
         {
           method: "POST",
           headers: {
@@ -344,7 +344,7 @@ export default function CreditsPage() {
     try {
       const token = localStorage.getItem("noslight_token");
       const res = await fetch(
-        `import.meta.env.VITE_API_URL/api/credits/customers/${account.id}/statement?start_date=${start}&end_date=${end}`,
+        `${import.meta.env.VITE_API_URL}/api/credits/customers/${account.id}/statement?start_date=${start}&end_date=${end}`,
         {
           headers: { Authorization: `Bearer ${token}` },
         },

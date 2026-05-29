@@ -9,7 +9,7 @@ return new class extends Migration
     public function up()
     {
         Schema::table('products', function (Blueprint $table) {
-            $table->boolean('is_direct_sale')->default(false)->after('is_raw');
+           // $table->boolean('is_direct_sale')->default(false)->after('is_raw');
         });
     }
 

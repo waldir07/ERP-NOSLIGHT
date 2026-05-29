@@ -56,7 +56,7 @@ export default function CheckoutModal({
     try {
       const token = localStorage.getItem("noslight_token");
       // Esta ruta la crearemos en el backend en un momento
-      const res = await fetch(`import.meta.env.VITE_API_URL/api/store-credits/${valeCode.trim()}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/store-credits/${valeCode.trim()}`, {
         headers: { "Authorization": `Bearer ${token}` },
       });
 
@@ -106,7 +106,7 @@ export default function CheckoutModal({
       try {
         const token = localStorage.getItem("noslight_token");
         const res = await fetch(
-          "import.meta.env.VITE_API_URL/api/customers/pos?t=" + new Date().getTime(),
+          import.meta.env.VITE_API_URL + "/api/customers/pos?t=" + new Date().getTime(),
           {
             headers: { Authorization: `Bearer ${token}` },
             cache: "no-store", // ← Restaurado

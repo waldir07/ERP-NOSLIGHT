@@ -12,13 +12,13 @@ return new class extends Migration
     // database/migrations/xxxx_create_transfer_items_table.php
     public function up()
     {
-        Schema::create('transfer_items', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('transfer_id')->constrained()->onDelete('cascade');
-            $table->foreignId('product_variant_id')->constrained();
-            $table->integer('quantity');
-            $table->timestamps();
-        });
+        //Schema::create('transfer_items', function (Blueprint $table) {
+          //  $table->id();
+            //$table->foreignId('transfer_id')->constrained()->onDelete('cascade');
+            //$table->foreignId('product_variant_id')->constrained();
+           // $table->integer('quantity');
+            //$table->timestamps();
+       // });
     }
 
     /**
