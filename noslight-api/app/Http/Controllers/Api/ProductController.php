@@ -9,7 +9,7 @@ use Illuminate\Validation\Rule;
 
 class ProductController extends Controller
 {
-   public function index(Request $request)
+/*   public function index(Request $request)
     {
         $query = Product::query();
 
@@ -25,7 +25,63 @@ class ProductController extends Controller
 
         // Retornamos solo los resultados que coincidan
         return response()->json($query->get());
+    }*/
+
+
+
+    /* habían errores en la inyección de cantidades
+    public function index(Request $request)
+    {
+        $query = Product::query();
+
+        // 1. Mantenemos tu lógica original de búsqueda intacta
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function($q) use ($search) {
+                $q->where('name', 'LIKE', '%' . $search . '%')
+                  ->orWhere('base_code', 'LIKE', '%' . $search . '%')
+                  ->orWhere('brand', 'LIKE', '%' . $search . '%');
+            });
+        }
+
+        // 2. NUEVO: Si el frontend solicita explícitamente paginación
+        if ($request->boolean('paginated')) {
+            // Capturamos cuántos productos por página quiere el frontend (por defecto 10)
+            $perPage = $request->input('per_page', 10);
+            return response()->json($query->paginate($perPage));
+        }
+
+        // 3. RETROCOMPATIBILIDAD: Si no pide paginación, devuelve el array completo de siempre
+        return response()->json($query->get());
+    }*/
+
+    public function index(Request $request)
+    {
+        $query = Product::query();
+
+        // 1. Lógica de búsqueda original
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function($q) use ($search) {
+                $q->where('name', 'LIKE', '%' . $search . '%')
+                  ->orWhere('base_code', 'LIKE', '%' . $search . '%')
+                  ->orWhere('brand', 'LIKE', '%' . $search . '%');
+            });
+        }
+
+
+
+        // 2. CORRECCIÓN ULTRA SEGURA: Solo si el frontend envía explícitamente '?paginated=true'
+        // Usamos 'has' y validamos texto plano para evitar falsos positivos en otras vistas
+        if ($request->has('paginated') && $request->input('paginated') == 'true') {
+            $perPage = $request->input('per_page', 10);
+            return response()->json($query->paginate($perPage));
+        }
+
+        // 3. RETROCOMPATIBILIDAD ABSOLUTA: Cualquier otra pantalla (como Auditoría) recibe el array limpio de siempre
+        return response()->json($query->get());
     }
+
 
     public function store(Request $request)
     {
