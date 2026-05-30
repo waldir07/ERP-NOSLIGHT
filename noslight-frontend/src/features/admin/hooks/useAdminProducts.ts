@@ -21,29 +21,7 @@ export interface Product {
 
 }
 
-/*----probando nueva paginación ----
 
-export const useAdminProducts = () => {
-  return useQuery<Product[]>({
-    queryKey: ['admin-products'],
-    queryFn: async () => {
-      const res = await axios.get('/api/products');
-      const rawData = res.data.data ?? res.data ?? [];
-
-      // Convertir campos numéricos correctamente
-      return rawData.map((product: any) => ({
-        ...product,
-        package_size: Number(product.package_size),
-        cost_price: Number(product.cost_price),
-        is_raw: Boolean(product.is_raw),
-        is_direct_sale: Boolean(product.is_direct_sale), // <-- Aseguramos que este campo también sea booleano, para mapear correctamente en el frontend
-        
-      }));
-    },
-  });
-};
-
-*/
 // src/features/admin/hooks/useAdminProducts.ts
 
 export const useAdminProducts = (page?: number, search?: string) => {
@@ -81,7 +59,7 @@ export const useAdminProducts = (page?: number, search?: string) => {
         is_direct_sale: Boolean(product.is_direct_sale),
       }));
 
-      
+
 
       // Si es paginado, retornamos la estructura de objeto que espera tu nueva grilla
       if (isPaginated) {

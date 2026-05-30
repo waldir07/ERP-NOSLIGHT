@@ -6,54 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Models\Product;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use App\Imports\ProductsImport;
+use Maatwebsite\Excel\Facades\Excel;
+use App\Exports\ProductsExport;
 
 class ProductController extends Controller
 {
-/*   public function index(Request $request)
-    {
-        $query = Product::query();
 
-        // Si el frontend envía una búsqueda, filtramos directamente en Laravel
-        if ($request->filled('search')) {
-            $search = $request->search;
-            $query->where(function($q) use ($search) {
-                $q->where('name', 'LIKE', '%' . $search . '%')
-                  ->orWhere('base_code', 'LIKE', '%' . $search . '%')
-                  ->orWhere('brand', 'LIKE', '%' . $search . '%');
-            });
-        }
-
-        // Retornamos solo los resultados que coincidan
-        return response()->json($query->get());
-    }*/
-
-
-
-    /* habían errores en la inyección de cantidades
-    public function index(Request $request)
-    {
-        $query = Product::query();
-
-        // 1. Mantenemos tu lógica original de búsqueda intacta
-        if ($request->filled('search')) {
-            $search = $request->search;
-            $query->where(function($q) use ($search) {
-                $q->where('name', 'LIKE', '%' . $search . '%')
-                  ->orWhere('base_code', 'LIKE', '%' . $search . '%')
-                  ->orWhere('brand', 'LIKE', '%' . $search . '%');
-            });
-        }
-
-        // 2. NUEVO: Si el frontend solicita explícitamente paginación
-        if ($request->boolean('paginated')) {
-            // Capturamos cuántos productos por página quiere el frontend (por defecto 10)
-            $perPage = $request->input('per_page', 10);
-            return response()->json($query->paginate($perPage));
-        }
-
-        // 3. RETROCOMPATIBILIDAD: Si no pide paginación, devuelve el array completo de siempre
-        return response()->json($query->get());
-    }*/
 
     public function index(Request $request)
     {
@@ -192,5 +151,40 @@ class ProductController extends Controller
     {
         $product->delete();
         return response()->json(null, 204);
+    }
+
+    // Asegúrate de tener estas dos líneas en la parte superior del archivo (con los demás 'use'):
+    // use App\Imports\ProductsImport;
+    // use Maatwebsite\Excel\Facades\Excel;
+
+
+    public function exportExcel()
+    {
+        // Esto genera el archivo y fuerza la descarga con el nombre 'productos_actuales.xlsx'
+        return Excel::download(new ProductsExport, 'productos_actuales.xlsx');
+    }
+
+    public function importExcel(\Illuminate\Http\Request $request)
+    {
+        // 1. Validamos que obligatoriamente envíen un archivo Excel o CSV
+        $request->validate([
+            'file' => 'required|mimes:xlsx,xls,csv|max:10240', // Máximo 10MB
+        ]);
+
+        try {
+            // 2. Le pasamos el archivo a nuestro motor
+            Excel::import(new ProductsImport, $request->file('file'));
+
+            // 3. Respondemos que todo salió bien
+            return response()->json([
+                'message' => 'Productos importados correctamente'
+            ], 200);
+
+        } catch (\Exception $e) {
+            // Si algo falla, atrapamos el error para no crashear la página
+            return response()->json([
+                'message' => 'Error al importar: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }

@@ -1,15 +1,17 @@
 // src/features/admin/components/AdminProducts.tsx
-import { useState } from "react";
-import { 
-  useAdminProducts, 
-  useCreateProduct, 
-  useUpdateProduct, 
+import { useState, useEffect } from "react";
+import {
+  useAdminProducts,
+  useCreateProduct,
+  useUpdateProduct,
   useDeleteProduct,
-  type Product 
+
+  type Product
 } from "../hooks/useAdminProducts";
 import AdminProductForm from "./AdminProductForm";
 import AdminRawTransformationsModal from "./AdminRawTransformationsModal"; // ← Nuevo
 import { useToast } from "@/components/ToastProvider";
+import { ExcelActions } from '@/components/ExcelActions'; // Ajusta la ruta según donde lo guardaste
 
 export default function AdminProducts() {
   const { success, error: toastError } = useToast();
@@ -17,15 +19,22 @@ export default function AdminProducts() {
   const [view, setView] = useState<"list" | "form">("list");
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+
+
   
+  // 2. Lo que realmente le enviaremos a la base de datos
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+
+
   // 1. NUEVO: Estado para controlar la página actual de la tabla
   const [page, setPage] = useState(1);
 
   // Estado para el modal de transformaciones
   const [selectedRawProduct, setSelectedRawProduct] = useState<Product | null>(null);
-  
+
   // 2. NUEVO: Pasamos 'page' y 'searchTerm' al hook modificado.
-  const { data, isLoading, error } = useAdminProducts(page, searchTerm);
+  const { data, isLoading, error, refetch } = useAdminProducts(page, debouncedSearch);
 
   // 3. NUEVO: Extraemos de forma segura los datos y la metadata de paginación
   const productsList: Product[] = data && typeof data === 'object' && 'products' in data ? data.products : (Array.isArray(data) ? data : []);
@@ -36,6 +45,17 @@ export default function AdminProducts() {
   const createMutation = useCreateProduct();
   const updateMutation = useUpdateProduct();
   const deleteMutation = useDeleteProduct();
+
+  // 3. La magia: Esperar a que el usuario deje de teclear
+  useEffect(() => {
+    // Configuramos un cronómetro de medio segundo
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+    }, 500);
+
+    // Si el usuario presiona otra tecla antes de medio segundo, cancelamos el cronómetro y empieza de nuevo
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   // 4. NUEVO: Al escribir en el buscador, regresamos siempre a la página 1 para evitar desfases
   const handleSearchChange = (value: string) => {
@@ -95,21 +115,36 @@ export default function AdminProducts() {
     }
   };
 
-  if (isLoading) return <div className="text-center py-12 text-gray-600">Cargando productos...</div>;
+
+
+
+
+  
   if (error) return <div className="text-red-600 text-center py-12">Error al cargar los productos</div>;
 
   return (
     <div className="p-6">
+
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-3xl font-bold text-gray-900">Gestión de Productos</h2>
 
         {view === "list" && (
-          <button
-            onClick={handleCreateClick}
-            className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-xl flex items-center gap-2 transition font-medium"
-          >
-            ➕ Crear Nuevo Producto
-          </button>
+          <div className="flex items-center gap-3">
+            {/* 1. Tus nuevos botones de Excel */}
+            <ExcelActions
+              exportUrl={`${import.meta.env.VITE_API_URL}/api/products/export`}
+              importUrl={`${import.meta.env.VITE_API_URL}/api/products/import`}
+              onSuccess={() => refetch()}
+            />
+
+            {/* 2. Tu botón original */}
+            <button
+              onClick={handleCreateClick}
+              className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-xl flex items-center gap-2 transition font-medium"
+            >
+              ➕ Crear Nuevo Producto
+            </button>
+          </div>
         )}
       </div>
 
@@ -121,13 +156,13 @@ export default function AdminProducts() {
               type="text"
               placeholder="Buscar por nombre o código (usa M- para filtrar solo Raw)..."
               value={searchTerm}
-              onChange={(e) => handleSearchChange(e.target.value)}
+              onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full border border-gray-300 rounded-2xl px-5 py-3 pl-12 focus:ring-2 focus:ring-blue-500 outline-none"
             />
             <span className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400">🔎</span>
             {searchTerm && (
               <button
-                onClick={() => handleSearchChange("")}
+                onClick={() => setSearchTerm("")}
                 className="absolute right-5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
               >
                 ✕
@@ -141,7 +176,14 @@ export default function AdminProducts() {
           )}
         </div>
       )}
-      
+
+      {/* Indicador de carga seguro (No destruye la barra) */}
+      {view === "list" && isLoading && (
+        <div className="text-center py-8 text-gray-500 font-medium animate-pulse">
+          ⏳ Buscando productos...
+        </div>
+      )}
+
 
       {/* Lista de Productos */}
       {view === "list" && (
@@ -217,7 +259,7 @@ export default function AdminProducts() {
                 <div className="text-sm text-gray-700">
                   Mostrando página <span className="font-medium">{page}</span> de <span className="font-medium">{lastPage}</span> ({totalProducts} productos en total)
                 </div>
-                
+
                 <div className="flex space-x-2">
                   <button
                     onClick={() => setPage(prev => Math.max(prev - 1, 1))}
@@ -226,7 +268,7 @@ export default function AdminProducts() {
                   >
                     Anterior
                   </button>
-                  
+
                   <button
                     onClick={() => setPage(prev => Math.min(prev + 1, lastPage))}
                     disabled={page === lastPage}

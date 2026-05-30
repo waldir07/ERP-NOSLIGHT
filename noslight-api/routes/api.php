@@ -131,10 +131,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     //momentaneo para inyección
     Route::post('/admin/inventory/bulk-inject', [InventoryAdjustmentController::class, 'bulkAdminInject']);
-
-
-
-
-
-
 });
+    //inyeccion de excel
+
+    Route::post('/products/import', [ProductController::class, 'importExcel']);
+    Route::get('/products/export', [ProductController::class, 'exportExcel']);
