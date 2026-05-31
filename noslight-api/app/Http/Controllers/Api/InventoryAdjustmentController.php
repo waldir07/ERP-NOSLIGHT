@@ -12,10 +12,6 @@ use Illuminate\Validation\Rule;
 
 class InventoryAdjustmentController extends Controller
 {
-
-    // app/Http/Controllers/Api/InventoryAdjustmentController.php
-    // app/Http/Controllers/Api/InventoryAdjustmentController.php
-
     // 1. El operario solo solicita
     public function store(Request $request)
     {
@@ -60,7 +56,7 @@ class InventoryAdjustmentController extends Controller
         });
     }
 
-    // Método exclusivo de Admin para inyección directa sin pasar por el estado 'PENDIENTE'
+    // Método exclusivo de Admin para inyección directa masiva
     public function bulkAdminInject(Request $request)
     {
         $request->validate([
@@ -72,29 +68,25 @@ class InventoryAdjustmentController extends Controller
         ]);
 
         $user = auth()->id();
-        // Buscamos el almacén correspondiente según lo seleccionado
         $warehouse = \App\Models\Warehouse::where('code', $request->warehouse_code)->firstOrFail();
 
         return DB::transaction(function () use ($request, $user, $warehouse) {
             foreach ($request->items as $item) {
-
-                // 🎯 SOLUCIÓN AL BUG: Buscamos la variante exacta cruzando producto Y amperaje
                 $variant = ProductVariant::where('product_id', $item['product_id'])
                     ->where('amperage', $item['amperage'])
                     ->first();
 
                 if (!$variant) {
-                    continue; // Si por algún motivo no existe esa combinación de amperaje, la salta de forma segura
+                    continue;
                 }
 
-                // 1. Inyectamos directamente en la tabla de stocks
                 $stock = Stock::firstOrCreate(
                     ['product_variant_id' => $variant->id, 'warehouse_id' => $warehouse->id],
                     ['quantity' => 0]
                 );
+
                 $stock->increment('quantity', $item['quantity']);
 
-                // 2. Dejamos el historial registrado como APROBADO de forma automática para auditorías
                 InventoryAdjustment::create([
                     'product_id'   => $item['product_id'],
                     'warehouse_id' => $warehouse->id,
@@ -111,27 +103,24 @@ class InventoryAdjustmentController extends Controller
         });
     }
 
+    // --- LAS 2 FUNCIONES NUEVAS DEL MODO DIOS ---
 
-    // 1. Obtener la lista unificada con stock actual cruzado
-    public function getAdminUnifiedStockList()
+    // 1. Obtener la lista unificada (Con Paginación y Filtros Inteligentes)
+    public function getAdminUnifiedStockList(Request $request)
     {
         $products = \App\Models\Product::all();
-        // Usamos keyBy('id') y pedimos los almacenes por su ID real (1 y 2)
         $warehouses = \App\Models\Warehouse::all()->keyBy('id');
-
         $almacenRaw = $warehouses->get(1);
-        $tienda = $warehouses->get(2);  
+        $tienda = $warehouses->get(2);
 
-        $result = [];
+        $result = collect();
 
         foreach ($products as $product) {
-            // Buscamos las variantes vinculadas al producto
             $variants = \App\Models\ProductVariant::where('product_id', $product->id)->get();
 
-            // Si no tiene variantes creadas aún, generamos una fila base de simulación
             if ($variants->isEmpty()) {
                 $sku = $product->is_raw ? 'M-' . $product->base_code : $product->base_code;
-                $result[] = [
+                $result->push([
                     'product_id' => $product->id,
                     'variant_id' => null,
                     'name' => $product->name,
@@ -142,12 +131,11 @@ class InventoryAdjustmentController extends Controller
                     'is_raw' => $product->is_raw,
                     'current_stock' => 0,
                     'warehouse_name' => $product->is_raw ? 'Almacén (Raw)' : 'Tienda (Terminado)'
-                ];
+                ]);
                 continue;
             }
 
             foreach ($variants as $variant) {
-                // Regla de negocio: Si es raw va al ALMACEN, si es terminado va a TIENDA
                 $targetWarehouse = $product->is_raw ? $almacenRaw : $tienda;
                 $stockQty = 0;
 
@@ -158,7 +146,7 @@ class InventoryAdjustmentController extends Controller
                     $stockQty = $stock ? $stock->quantity : 0;
                 }
 
-                $result[] = [
+                $result->push([
                     'product_id' => $product->id,
                     'variant_id' => $variant->id,
                     'name' => $product->name,
@@ -169,44 +157,69 @@ class InventoryAdjustmentController extends Controller
                     'is_raw' => $product->is_raw,
                     'current_stock' => $stockQty,
                     'warehouse_name' => $product->is_raw ? 'Almacén (Raw)' : 'Tienda (Terminado)'
-                ];
+                ]);
             }
+        }
+
+        // Aplicar filtros
+        if ($request->filled('type') && $request->type !== 'ALL') {
+            $isRawExpected = $request->type === 'RAW';
+            $result = $result->filter(function ($item) use ($isRawExpected) {
+                return $item['is_raw'] === $isRawExpected;
+            });
+        }
+
+        if ($request->filled('search')) {
+            $search = strtolower($request->search);
+            $result = $result->filter(function ($item) use ($search) {
+                return str_contains(strtolower($item['name']), $search) ||
+                       str_contains(strtolower($item['sku']), $search) ||
+                       str_contains(strtolower($item['base_code']), $search);
+            });
+        }
+
+        $result = $result->values();
+
+        // Paginación inteligente
+        if ($request->has('page')) {
+            $page = (int) $request->input('page', 1);
+            $perPage = 15;
+
+            $paginated = new \Illuminate\Pagination\LengthAwarePaginator(
+                $result->forPage($page, $perPage)->values(),
+                $result->count(),
+                $perPage,
+                $page,
+                ['path' => $request->url(), 'query' => $request->query()]
+            );
+            return response()->json($paginated);
         }
 
         return response()->json($result);
     }
 
-    // 2. Inyección directa fila por fila
+    // 2. Ajuste directo fila por fila (Modo Dios: acepta negativos)
     public function injectSingleRowStock(Request $request)
     {
         $request->validate([
             'product_id' => 'required|exists:products,id',
             'variant_id' => 'nullable',
-            'quantity'   => 'required|integer|min:1',
+            'quantity'   => 'required|integer|not_in:0',
         ]);
 
-        // 1. Buscamos el producto sin que lance 404 automático
         $product = \App\Models\Product::find($request->product_id);
         if (!$product) {
             return response()->json(['error' => 'El producto no existe en la BD.'], 404);
         }
 
         $user = auth()->id();
-
-        $warehouseCode = $product->is_raw ? 'ALMACEN' : 'TIENDA';
-
-        // 2. Buscamos el almacén sin el OrFail para ver si este era el culpable
-        // 2. Buscamos usando los IDs exactos de tu sistema (1 = Almacén, 2 = Tienda)
         $warehouseId = $product->is_raw ? 1 : 2;
         $warehouse = \App\Models\Warehouse::find($warehouseId);
 
         if (!$warehouse) {
-            return response()->json([
-                'message' => "ERROR FATAL: No se encontró el almacén con ID {$warehouseId}."
-            ], 400);
+            return response()->json(['message' => "ERROR FATAL: No se encontró el almacén."], 400);
         }
 
-        // Obtener o resolver la variante exacta
         if ($request->variant_id) {
             $variant = \App\Models\ProductVariant::find($request->variant_id);
         } else {
@@ -221,14 +234,19 @@ class InventoryAdjustmentController extends Controller
                 ['product_variant_id' => $variant->id, 'warehouse_id' => $warehouse->id],
                 ['quantity' => 0]
             );
+
             $stock->increment('quantity', $request->quantity);
 
+            $tipoAjuste = $request->quantity > 0 ? 'INGRESO_MANUAL_ADMIN' : 'SALIDA_MANUAL_ADMIN';
+            $accionDesc = $request->quantity > 0 ? 'Inyección' : 'Descuento';
+
+            // SOLUCIÓN: Solo guardamos los campos que realmente existen en tu BD
             \App\Models\InventoryAdjustment::create([
                 'product_id'   => $product->id,
                 'warehouse_id' => $warehouse->id,
                 'quantity'     => $request->quantity,
-                'reason'       => 'INVENTARIO_INICIAL',
-                'notes'        => 'Inyección directa por el Administrador desde grilla maestra',
+                'reason'       => $tipoAjuste,
+                'notes'        => "{$accionDesc} directa por el Administrador en Modo Dios",
                 'user_id'      => $user,
             ]);
 
