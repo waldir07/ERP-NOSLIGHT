@@ -113,19 +113,21 @@ export default function InventoryAuditPage() {
 
       if (res.ok) {
         const data = await res.json();
-        const mensaje = accion === 'SUMAR'
+        const mensaje = accion === 'SUMAR' 
           ? `🚀 ${item.sku}: ¡Se inyectaron +${Math.abs(quantity)} unidades con éxito!`
           : `📉 ${item.sku}: ¡Se descontaron -${Math.abs(quantity)} unidades!`;
-
+        
         success(mensaje);
-
+        
         setItems(prev => prev.map(p => {
           const matchCondition = p.product_id === item.product_id && p.variant_id === item.variant_id;
           return matchCondition ? { ...p, current_stock: data.new_stock } : p;
         }));
         setRowQuantities(prev => ({ ...prev, [key]: '' }));
       } else {
-        error("Error al procesar el ajuste de stock.");
+        // 👇 AHORA LEEMOS EL MENSAJE DE ERROR QUE ENVÍA LARAVEL 👇
+        const errorData = await res.json();
+        error(errorData.message || "Error al procesar el ajuste de stock.");
       }
     } catch (err) {
       error("Error de comunicación con el servidor.");

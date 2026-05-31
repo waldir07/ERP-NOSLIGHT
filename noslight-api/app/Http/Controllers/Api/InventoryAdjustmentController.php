@@ -173,8 +173,8 @@ class InventoryAdjustmentController extends Controller
             $search = strtolower($request->search);
             $result = $result->filter(function ($item) use ($search) {
                 return str_contains(strtolower($item['name']), $search) ||
-                       str_contains(strtolower($item['sku']), $search) ||
-                       str_contains(strtolower($item['base_code']), $search);
+                    str_contains(strtolower($item['sku']), $search) ||
+                    str_contains(strtolower($item['base_code']), $search);
             });
         }
 
@@ -198,7 +198,7 @@ class InventoryAdjustmentController extends Controller
         return response()->json($result);
     }
 
-    // 2. Ajuste directo fila por fila (Modo Dios: acepta negativos)
+    // 2. Ajuste directo fila por fila (Modo Dios: Blindado contra negativos)
     public function injectSingleRowStock(Request $request)
     {
         $request->validate([
@@ -229,18 +229,42 @@ class InventoryAdjustmentController extends Controller
             );
         }
 
-        return \Illuminate\Support\Facades\DB::transaction(function () use ($product, $variant, $warehouse, $request, $user) {
-            $stock = \App\Models\Stock::firstOrCreate(
-                ['product_variant_id' => $variant->id, 'warehouse_id' => $warehouse->id],
-                ['quantity' => 0]
-            );
+        // 🛡️ PASO 1: Buscar el stock actual antes de hacer nada
+        $stockRecord = \App\Models\Stock::where('product_variant_id', $variant->id)
+            ->where('warehouse_id', $warehouse->id)
+            ->first();
 
-            $stock->increment('quantity', $request->quantity);
+        $stockActual = $stockRecord ? $stockRecord->quantity : 0;
+
+        // 🛡️ PASO 2: Si es una resta, verificar que no nos pasemos de cero
+        if ($request->quantity < 0) {
+            $cantidadARestar = abs($request->quantity); // Convertir a positivo para comparar
+            if ($cantidadARestar > $stockActual) {
+                // Devolvemos un error 422 (Unprocessable Entity) que React puede leer fácilmente
+                return response()->json([
+                    'message' => "Operación denegada: Intentas restar {$cantidadARestar} unidades, pero solo hay {$stockActual} en stock."
+                ], 422);
+            }
+        }
+
+        // 🚀 PASO 3: Si pasó la seguridad, ejecutamos la transacción
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($product, $variant, $warehouse, $request, $user, $stockRecord) {
+
+            // Si el stock no existía, lo creamos
+            if (!$stockRecord) {
+                $stockRecord = \App\Models\Stock::create([
+                    'product_variant_id' => $variant->id,
+                    'warehouse_id' => $warehouse->id,
+                    'quantity' => 0
+                ]);
+            }
+
+            // Hacemos la suma o resta real
+            $stockRecord->increment('quantity', $request->quantity);
 
             $tipoAjuste = $request->quantity > 0 ? 'INGRESO_MANUAL_ADMIN' : 'SALIDA_MANUAL_ADMIN';
             $accionDesc = $request->quantity > 0 ? 'Inyección' : 'Descuento';
 
-            // SOLUCIÓN: Solo guardamos los campos que realmente existen en tu BD
             \App\Models\InventoryAdjustment::create([
                 'product_id'   => $product->id,
                 'warehouse_id' => $warehouse->id,
@@ -252,7 +276,7 @@ class InventoryAdjustmentController extends Controller
 
             return response()->json([
                 'message' => 'Stock inyectado con éxito',
-                'new_stock' => $stock->quantity
+                'new_stock' => $stockRecord->fresh()->quantity // Devolvemos el stock exacto actualizado
             ]);
         });
     }
