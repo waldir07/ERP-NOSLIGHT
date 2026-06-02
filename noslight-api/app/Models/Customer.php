@@ -7,11 +7,17 @@ use Illuminate\Database\Eloquent\Model;
 
 class Customer extends Model
 {
-
     use HasFactory;
 
     // ESTA ES LA LÍNEA MÁGICA QUE ARREGLA EL ERROR:
     protected $guarded = [];
+
+    // 👇 Le decimos a Laravel qué tipo de dato es cada cosa
+    protected $casts = [
+        'has_credit' => 'boolean',
+        'credit_limit' => 'decimal:2',
+        'credit_balance' => 'decimal:2',
+    ];
 
     // 👇 ESTA ES LA CONEXIÓN QUE LARAVEL ESTABA BUSCANDO
     public function sales()
@@ -24,5 +30,4 @@ class Customer extends Model
     {
         return $this->hasMany(CreditPayment::class);
     }
-
 }

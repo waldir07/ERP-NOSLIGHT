@@ -99,14 +99,22 @@ Route::middleware('auth:sanctum')->group(function () {
     // Rutas para el Cuaderno de Créditos de la Jefa
     Route::get('/credits/pending', [\App\Http\Controllers\Api\CreditController::class, 'getPending']);
     Route::post('/credits/{id}/approve', [\App\Http\Controllers\Api\CreditController::class, 'approve']);
-    Route::post('/customers/pos', [\App\Http\Controllers\Api\CustomerController::class, 'storeQuick']);
+
     Route::get('/credits/accounts', [\App\Http\Controllers\Api\CreditController::class, 'getAccounts']);
     Route::post('/credits/customers/{id}/payments', [\App\Http\Controllers\Api\CreditController::class, 'addPayment']);
     Route::get('/credits/customers/{id}/statement', [CreditController::class, 'getCustomerStatement']);
     Route::post('/credits/approve-group', [\App\Http\Controllers\Api\CreditController::class, 'approveGroup']);
 
-    Route::get('/customers/pos', [\App\Http\Controllers\Api\CustomerController::class, 'getPosCustomers']); // <-- Esta lee la lista
-    Route::post('/customers/pos', [\App\Http\Controllers\Api\CustomerController::class, 'storeQuick']);     // <-- Esta guarda el +Nuevo
+    Route::patch('/customers/{id}/toggle-status', [\App\Http\Controllers\Api\CustomerController::class, 'toggleStatus']);
+
+
+    // 1. Ruta para la caja (Solo lee la lista, NO crea)
+    Route::get('/customers/pos', [\App\Http\Controllers\Api\CustomerController::class, 'getPosCustomers']);
+
+    // 2. Rutas para el Panel de Administración (Gestión total)
+    Route::get('/customers', [\App\Http\Controllers\Api\CustomerController::class, 'index']);
+    Route::post('/customers', [\App\Http\Controllers\Api\CustomerController::class, 'store']);
+    Route::put('/customers/{id}', [\App\Http\Controllers\Api\CustomerController::class, 'update']);
 
     // --- ALERTAS Y REPORTES ---
     Route::get('/alerts/low-stock-raw', [StockController::class, 'lowRawStock']);
@@ -131,8 +139,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
     //momentaneo para inyección
     Route::post('/admin/inventory/bulk-inject', [InventoryAdjustmentController::class, 'bulkAdminInject']);
+
+
 });
     //inyeccion de excel
 
     Route::post('/products/import', [ProductController::class, 'importExcel']);
     Route::get('/products/export', [ProductController::class, 'exportExcel']);
+
+

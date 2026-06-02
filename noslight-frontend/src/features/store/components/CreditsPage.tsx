@@ -13,9 +13,7 @@ import {
   Banknote,
 } from "lucide-react";
 export default function CreditsPage() {
-  const [activeTab, setActiveTab] = useState<"pendientes" | "cuentas">(
-    "pendientes",
-  );
+
   const [searchTerm, setSearchTerm] = useState("");
 
   // Datos del Tab 1: Pendientes
@@ -36,6 +34,16 @@ export default function CreditsPage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("efectivo");
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+
+  // 1. EL CANDADO DEFINITIVO (Leyendo el JSON de noslight_user)
+  const userStr = localStorage.getItem("noslight_user");
+  const userObj = userStr ? JSON.parse(userStr) : null;
+  const isAdmin = userObj?.role?.toUpperCase() === "ADMIN";
+
+  // 2. ESTADO INICIAL
+  const [activeTab, setActiveTab] = useState<"pendientes" | "cuentas">(
+    isAdmin ? "pendientes" : "cuentas"
+  );
 
   // Le agregamos "cobranza" a la lista de permitidos
   const [accountTab, setAccountTab] = useState<
@@ -124,9 +132,10 @@ export default function CreditsPage() {
     }
   };
 
-  // Disparadores de carga según la pestaña
+
+  // 3. EL USEEFFECT (Exactamente como me mostraste en tu última captura)
   useEffect(() => {
-    if (activeTab === "pendientes") fetchPendingSales();
+    if (activeTab === "pendientes" && isAdmin) fetchPendingSales();
     if (activeTab === "cuentas") fetchAccounts();
   }, [activeTab]);
 
@@ -228,8 +237,8 @@ export default function CreditsPage() {
     if (totalPaid > parseFloat(selectedAccount.credit_balance)) {
       return alert(
         "El abono no puede ser mayor a la deuda total (S/ " +
-          selectedAccount.credit_balance +
-          ").",
+        selectedAccount.credit_balance +
+        ").",
       );
     }
 
@@ -283,7 +292,7 @@ export default function CreditsPage() {
         // Limpiar todo y cerrar modal
         setSelectedAccount(null);
         setPayments([{ id: "1", method: "efectivo", amount: "" }]);
-        fetchAccounts(); 
+        fetchAccounts();
       } else {
         const errData = await res.json();
         alert("Error al registrar: " + (errData.message || "Verifica los datos"));
@@ -383,8 +392,8 @@ export default function CreditsPage() {
 
     const allMovements = selectedAccount.history
       ? selectedAccount.history.flatMap((day: any) =>
-          day.movements.map((mov: any) => ({ ...mov, date: day.date }))
-        )
+        day.movements.map((mov: any) => ({ ...mov, date: day.date }))
+      )
       : [];
 
     let itemsHtml = "";
@@ -394,15 +403,15 @@ export default function CreditsPage() {
       allMovements.forEach((mov: any) => {
         // Fecha corta (Ej: 21/05) para ahorrar espacio en la línea
         const formattedDate = new Date(mov.date + "T00:00:00").toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit" });
-        
+
         if (mov.is_payment) {
-            itemsHtml += `
+          itemsHtml += `
             <div class="item">
-              <span>${formattedDate} PAGO ${mov.method ? mov.method.substring(0,4).toUpperCase() : 'EFEC'}</span>
+              <span>${formattedDate} PAGO ${mov.method ? mov.method.substring(0, 4).toUpperCase() : 'EFEC'}</span>
               <span>-S/ ${parseFloat(mov.amount).toFixed(2)}</span>
             </div>`;
         } else {
-            itemsHtml += `
+          itemsHtml += `
             <div class="item">
               <span>${formattedDate} ${mov.description}</span>
               <span>S/ ${parseFloat(mov.amount).toFixed(2)}</span>
@@ -532,9 +541,6 @@ export default function CreditsPage() {
     setTimeout(() => document.body.removeChild(iframe), 1000);
   };
 
-
-  // 2. FUNCIÓN PARA GENERAR HOJA COMPLETA DE ESTADO DE CUENTA (REPORTE A4 PDF)
-  // 2. FUNCIÓN PARA GENERAR HOJA COMPLETA (Solo abre la pestaña, NO imprime automáticamente)
   const handlePrintPDFReport = () => {
     if (!selectedAccount) return;
 
@@ -555,37 +561,76 @@ export default function CreditsPage() {
       tableRows = `<tr><td colspan="3" style="text-align:center; padding:20px; color:#aaa; font-style:italic;">No hay movimientos registrados.</td></tr>`;
     } else {
       allMovements.forEach((mov: any) => {
-        const formattedDate = new Date(mov.date + "T00:00:00").toLocaleDateString("es-PE", {
+        
+        // 🛡️ BLINDAJE DE FECHA Y HORA CORREGIDO: 
+        // Tu backend de Laravel envía la fecha exacta dentro de 'full_date' o la hora en 'time'
+        let dateString = mov.date + "T00:00:00"; // Valor por defecto
+        if (mov.full_date) {
+            dateString = mov.full_date;
+        } else if (mov.time) {
+            dateString = mov.date + "T" + mov.time + ":00";
+        }
+        const dateObj = new Date(dateString);
+        
+        // Formato: 1 de junio de 2026
+        const formattedDate = dateObj.toLocaleDateString("es-PE", {
           day: "numeric", month: "long", year: "numeric"
         });
 
+        // Formato: 02:30 PM (Si no hay hora exacta, mostrará 12:00 AM temporalmente)
+        const formattedTime = dateObj.toLocaleTimeString("es-PE", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true
+        });
+
         if (mov.is_payment) {
-            tableRows += `
+          tableRows += `
             <tr style="border-bottom: 1px solid #e2e8f0; background-color: #f0fdf4;">
-                <td style="padding: 14px; font-weight: bold; color: #166534;">${formattedDate}</td>
-                <td style="padding: 14px; text-align: left; color: #166534;">
+                <td style="padding: 14px; font-weight: bold; color: #166534; vertical-align: top;">
+                    ${formattedDate}<br>
+                    <span style="font-size: 11px; color: #15803d; font-weight: normal;">🕒 ${formattedTime}</span>
+                </td>
+                <td style="padding: 14px; text-align: left; color: #166534; vertical-align: top;">
                     <strong>💰 ABONO / PAGO REGISTRADO (${mov.method || 'Efectivo'})</strong>
                 </td>
-                <td style="padding: 14px; text-align: right; font-weight: bold; color: #166534; font-size: 14px;">
-                    - S/ ${parseFloat(mov.amount).toFixed(2)}
+                <td style="padding: 14px; text-align: right; font-weight: bold; color: #166534; font-size: 14px; vertical-align: top;">
+                    - S/ ${parseFloat(mov.amount || 0).toFixed(2)}
                 </td>
             </tr>`;
         } else {
-            let productsList = `<strong style="color:#1e293b; font-size: 14px;">${mov.description}</strong>`;
-            if (mov.details && mov.details.length > 0) {
-              productsList += `<ul style="margin: 6px 0 0 0; padding-left: 20px; color: #475569; font-size: 13px;">`;
-              mov.details.forEach((d: any) => {
-                productsList += `<li>${d.quantity} und. x ${d.product_variant?.product?.name || "Producto general"}</li>`;
-              });
-              productsList += `</ul>`;
-            }
+          // ==========================================
+          // 🚀 MEJORA: DIBUJAR PRECIOS Y SUBTOTALES
+          // ==========================================
+          let productsList = `<strong style="color:#1e293b; font-size: 14px;">${mov.description || 'Despacho'}</strong>`;
+          
+          if (mov.details && mov.details.length > 0) {
+            productsList += `<ul style="margin: 8px 0 0 0; padding-left: 20px; color: #475569; font-size: 13px; list-style-type: square;">`;
+            
+            mov.details.forEach((d: any) => {
+              const productName = d.product_variant?.product?.name || "Producto general";
+              const unitPrice = parseFloat(d.unit_price || 0).toFixed(2);
+              const subTotalItem = parseFloat(d.subtotal || (d.quantity * parseFloat(d.unit_price || 0))).toFixed(2);
+              
+              productsList += `<li style="margin-bottom: 6px;">
+                <strong>${d.quantity} und.</strong> x ${productName} 
+                <span style="color:#64748b; font-size:11px; margin-left:4px;">(S/ ${unitPrice} c/u)</span>
+                <span style="float:right; font-weight:bold; color:#334155; margin-right: 15px;">S/ ${subTotalItem}</span>
+              </li>`;
+            });
+            
+            productsList += `</ul>`;
+          }
 
-            tableRows += `
+          tableRows += `
             <tr style="border-bottom: 1px solid #e2e8f0;">
-                <td style="padding: 14px; font-weight: 500; color: #334155;">${formattedDate}</td>
-                <td style="padding: 14px; text-align: left;">${productsList}</td>
-                <td style="padding: 14px; text-align: right; font-weight: bold; color: #0f172a; font-size: 14px;">
-                    S/ ${parseFloat(mov.amount).toFixed(2)}
+                <td style="padding: 14px; font-weight: 500; color: #334155; vertical-align: top;">
+                    ${formattedDate}<br>
+                    <span style="font-size: 11px; color: #64748b;">🕒 ${formattedTime}</span>
+                </td>
+                <td style="padding: 14px; text-align: left; vertical-align: top;">${productsList}</td>
+                <td style="padding: 14px; text-align: right; font-weight: bold; color: #0f172a; font-size: 14px; vertical-align: top;">
+                    S/ ${parseFloat(mov.amount || 0).toFixed(2)}
                 </td>
             </tr>`;
         }
@@ -595,7 +640,7 @@ export default function CreditsPage() {
     const pdfHtml = `
     <html>
     <head>
-        <title>Estado de Cuenta - ${selectedAccount.name}</title>
+        <title>Estado de Cuenta - ${selectedAccount.name || 'Cliente'}</title>
         <style>
             body { font-family: 'Segoe UI', Arial, sans-serif; margin: 45px; color: #333; line-height: 1.5; }
             .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 4px solid #1e3a8a; padding-bottom: 25px; margin-bottom: 5px; }
@@ -613,7 +658,7 @@ export default function CreditsPage() {
     <body>
         <div class="header">
             <div>
-                <span class="company-title">MI ERP - EMPRESA</span><br>
+                <span class="company-title">NOSLIGHT</span><br>
                 <span style="font-size: 13px; color: #64748b;">RUC: 10XXXXXXXXX • Reporte Oficial</span>
             </div>
             <div class="report-title">
@@ -624,7 +669,7 @@ export default function CreditsPage() {
 
         <div class="info-box">
             <table style="width:60%; margin:0; border:none;">
-                <tr><td style="padding:4px 0; width:30%;"><strong>CLIENTE:</strong></td><td style="padding:4px 0; color:#334155;">${selectedAccount.name}</td></tr>
+                <tr><td style="padding:4px 0; width:30%;"><strong>CLIENTE:</strong></td><td style="padding:4px 0; color:#334155;">${selectedAccount.name || ''}</td></tr>
                 ${selectedAccount.document_number ? `<tr><td style="padding:4px 0;"><strong>DNI/RUC:</strong></td><td style="padding:4px 0; color:#334155;">${selectedAccount.document_number}</td></tr>` : ''}
                 <tr><td style="padding:4px 0;"><strong>ESTADO:</strong></td><td style="padding:4px 0; color:#b91c1c; font-weight:bold;">SALDO DEUDOR ACTIVO</td></tr>
             </table>
@@ -646,7 +691,7 @@ export default function CreditsPage() {
         <div class="total-box">
             <div class="total-card">
                 <span style="font-size: 14px; font-weight: bold; color: #475569;">TOTAL PENDIENTE DE PAGO:</span>
-                <div style="font-size: 32px; font-weight: 900; color: #b91c1c; margin-top: 5px;">S/ ${parseFloat(selectedAccount.credit_balance).toFixed(2)}</div>
+                <div style="font-size: 32px; font-weight: 900; color: #b91c1c; margin-top: 5px;">S/ ${parseFloat(selectedAccount.credit_balance || 0).toFixed(2)}</div>
             </div>
         </div>
 
@@ -660,7 +705,7 @@ export default function CreditsPage() {
     printWindow.document.write(pdfHtml);
     printWindow.document.close();
   };
-
+  
 
   // Filtros de búsqueda inteligentes
   const filteredPending = pendingSales.filter((group) => {
@@ -686,27 +731,30 @@ export default function CreditsPage() {
             Gestiona los despachos, fija precios y controla las deudas.
           </p>
         </div>
-
-        <div className="flex bg-gray-200 p-1 rounded-2xl">
-          <button
-            onClick={() => setActiveTab("pendientes")}
-            className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm transition-all ${activeTab === "pendientes" ? "bg-white text-blue-700 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
-          >
-            <Clock size={18} /> Por Valorizar{" "}
-            {pendingSales.length > 0 && (
-              <span className="bg-red-500 text-white px-2 py-0.5 rounded-full text-xs">
-                {pendingSales.length}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("cuentas")}
-            className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm transition-all ${activeTab === "cuentas" ? "bg-white text-green-700 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
-          >
-            <Users size={18} /> Cuentas de Clientes
-          </button>
-        </div>
+        {/* 👇 AQUÍ ESTÁ EL CANDADO VISUAL 👇 */}
+        {isAdmin && (
+          <div className="flex bg-gray-200 p-1 rounded-2xl">
+            <button
+              onClick={() => setActiveTab("pendientes")}
+              className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm transition-all ${activeTab === "pendientes" ? "bg-white text-blue-700 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+            >
+              <Clock size={18} /> Por Valorizar{" "}
+              {pendingSales.length > 0 && (
+                <span className="bg-red-500 text-white px-2 py-0.5 rounded-full text-xs">
+                  {pendingSales.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab("cuentas")}
+              className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm transition-all ${activeTab === "cuentas" ? "bg-white text-green-700 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+            >
+              <Users size={18} /> Cuentas de Clientes
+            </button>
+          </div>
+        )}
       </div>
+
 
       {/* BUSCADOR */}
       <div className="mb-6 relative">
@@ -886,10 +934,7 @@ export default function CreditsPage() {
                   Fijar Precios del Día
                 </h2>
                 <p className="text-gray-400 text-sm mt-1">
-                  {selectedGroup.customer_name} • 📅{" "}
-                  {new Date(
-                    selectedGroup.date + "T00:00:00",
-                  ).toLocaleDateString("es-PE")}
+                  Cliente: <span className="text-white font-bold">{selectedGroup.customer_name}</span> • {selectedGroup.sale_ids.length} vale(s) pendiente(s)
                 </p>
               </div>
               <button
@@ -1300,8 +1345,8 @@ export default function CreditsPage() {
                               <button
                                 onClick={() => setMovementFilter("all")}
                                 className={`px-5 py-2 text-sm font-bold rounded-xl transition-all ${movementFilter === "all"
-                                    ? "bg-gray-900 text-white shadow"
-                                    : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
+                                  ? "bg-gray-900 text-white shadow"
+                                  : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
                                   }`}
                               >
                                 Todos
@@ -1309,8 +1354,8 @@ export default function CreditsPage() {
                               <button
                                 onClick={() => setMovementFilter("sales")}
                                 className={`px-5 py-2 text-sm font-bold rounded-xl transition-all ${movementFilter === "sales"
-                                    ? "bg-red-600 text-white shadow"
-                                    : "bg-white border border-red-200 text-red-600 hover:bg-red-50"
+                                  ? "bg-red-600 text-white shadow"
+                                  : "bg-white border border-red-200 text-red-600 hover:bg-red-50"
                                   }`}
                               >
                                 Solo Deudas
@@ -1318,8 +1363,8 @@ export default function CreditsPage() {
                               <button
                                 onClick={() => setMovementFilter("payments")}
                                 className={`px-5 py-2 text-sm font-bold rounded-xl transition-all ${movementFilter === "payments"
-                                    ? "bg-green-600 text-white shadow"
-                                    : "bg-white border border-green-200 text-green-600 hover:bg-green-50"
+                                  ? "bg-green-600 text-white shadow"
+                                  : "bg-white border border-green-200 text-green-600 hover:bg-green-50"
                                   }`}
                               >
                                 Solo Pagos
@@ -1400,8 +1445,8 @@ export default function CreditsPage() {
                             </div>
                             <div
                               className={`p-2 bg-white rounded-full shadow-sm text-gray-500 transition-transform duration-300 ${expandedDays.includes(dayGroup.date)
-                                  ? "rotate-180"
-                                  : ""
+                                ? "rotate-180"
+                                : ""
                                 }`}
                             >
                               <ChevronDown size={20} />
@@ -1454,8 +1499,8 @@ export default function CreditsPage() {
                                   </div>
                                   <div
                                     className={`font-black text-lg shrink-0 ${mov.is_payment
-                                        ? "text-green-600"
-                                        : "text-red-600"
+                                      ? "text-green-600"
+                                      : "text-red-600"
                                       }`}
                                   >
                                     {mov.is_payment ? "-" : "+"} S/{" "}
@@ -1481,7 +1526,7 @@ export default function CreditsPage() {
                     </h3>
                     <p className="text-center font-bold text-gray-700">Cliente: {selectedAccount.name}</p>
                     <p className="text-center text-xs text-gray-400">Fecha consulta: {new Date().toLocaleDateString()}</p>
-                    
+
                     {/* 🟢 SECCIÓN DE DETALLE DE VALES Y ABONOS SIMPLIFICADOS Y LEGIBLES EN PANTALLA */}
                     <div className="border-t border-b border-black my-4 py-3">
                       <p className="font-bold text-xs mb-3 uppercase tracking-wider text-gray-500">Resumen de Movimientos:</p>
@@ -1489,7 +1534,7 @@ export default function CreditsPage() {
                         {(!selectedAccount.history || selectedAccount.history.flatMap((d: any) => d.movements).length === 0) ? (
                           <p className="text-gray-400 italic text-xs text-center">No hay detalles de movimientos.</p>
                         ) : (
-                          selectedAccount.history.flatMap((day: any) => 
+                          selectedAccount.history.flatMap((day: any) =>
                             day.movements.map((mov: any) => ({ ...mov, date: day.date }))
                           ).map((mov: any, idx: number) => {
                             const dDate = new Date(mov.date + "T00:00:00").toLocaleDateString("es-PE", { day: "numeric", month: "short" });
@@ -1520,14 +1565,14 @@ export default function CreditsPage() {
                   </div>
 
                   <div className="mt-8 flex flex-col sm:flex-row gap-4 w-full max-w-md justify-center">
-                    <button 
+                    <button
                       onClick={handlePrintProforma}
                       className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow transition-colors w-full"
                     >
                       🖨️ Imprimir Ticket (80mm)
                     </button>
-                    
-                    <button 
+
+                    <button
                       onClick={handlePrintPDFReport}
                       className="bg-green-600 hover:bg-green-700 text-white px-6 py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow transition-colors w-full"
                     >

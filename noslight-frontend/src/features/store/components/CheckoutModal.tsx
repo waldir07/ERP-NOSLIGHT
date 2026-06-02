@@ -198,6 +198,37 @@ export default function CheckoutModal({
         "Debe seleccionar un cliente registrado para ventas a crédito.",
       );
     }
+
+    // ================================================================
+    // 🛡️ CANDADO DE CRÉDITO (Inyectado aquí)
+    // ================================================================
+    if (saleType === "credito") {
+      // Buscamos los datos completos del cliente usando su ID
+      // (Asumiendo que tienes el arreglo 'customers' disponible en tu componente)
+      const customer = customers.find(c => c.id === selectedCustomerId);
+
+      if (customer) {
+        // 1. BLOQUEO ABSOLUTO: Si tiene el switch de crédito apagado
+        if (!customer.has_credit) {
+          return alert("❌ VENTA DENEGADA: Este cliente NO tiene autorización para comprar a crédito. Por favor, cobre al contado.");
+        }
+
+        // 2. ADVERTENCIA FLEXIBLE: Si supera el límite matemático
+        const currentBalance = parseFloat(customer.credit_balance || 0);
+        const creditLimit = parseFloat(customer.credit_limit || 0);
+        const newBalance = currentBalance + totalAmount;
+
+        if (newBalance > creditLimit) {
+          const proceed = window.confirm(`⚠️ ADVERTENCIA DE LÍMITE:\n\nEsta venta superará el límite de crédito del cliente.\nLímite permitido: S/ ${creditLimit.toFixed(2)}\nNuevo saldo proyectado: S/ ${newBalance.toFixed(2)}\n\n¿Deseas autorizar y guardar esta venta de todos modos?`);
+          
+          if (!proceed) {
+            return; // Aborta y detiene la venta si el cajero le da a "Cancelar"
+          }
+        }
+      }
+    }
+    // ================================================================
+
     if (saleType === "contado" && remaining > 0.01) {
       return alert("Falta cubrir el monto total de la venta.");
     }
@@ -401,6 +432,12 @@ export default function CheckoutModal({
     printWindow.document.close();
   };
 
+  // 🧠 FILTRO DINÁMICO DE CLIENTES:
+  // Si es crédito, solo muestra a los que tienen 'has_credit'. Si es contado, los muestra todos.
+  const clientesDisponibles = saleType === "credito" 
+    ? customers.filter(c => c.has_credit === true || c.has_credit === 1) 
+    : customers;
+
   // ... (el resto del JSX se mantiene igual al que te di antes, compacto)
 
   return (
@@ -440,7 +477,16 @@ export default function CheckoutModal({
                   AL CONTADO
                 </button>
                 <button
-                  onClick={() => setSaleType("credito")}
+                  onClick={() => {
+                    setSaleType("credito");
+                    
+                    // 🐛 BUGFIX: El cazador de fantasmas
+                    // Si el cliente actual NO tiene crédito, lo borramos de la memoria al cambiar de pestaña
+                    const customer = customers.find(c => c.id.toString() === selectedCustomerId);
+                    if (customer && !customer.has_credit) {
+                      setSelectedCustomerId(""); // Lo regresamos a Público General internamente
+                    }
+                  }}
                   className={`flex-1 py-3 rounded-xl font-bold text-sm ${saleType === "credito" ? "bg-white shadow text-orange-600" : "text-gray-500"}`}
                 >
                   A CRÉDITO
@@ -461,7 +507,7 @@ export default function CheckoutModal({
                 className="w-full p-4 border border-gray-300 bg-white rounded-2xl font-medium focus:outline-none focus:border-blue-500"
               >
                 <option value="">-- Público General --</option>
-                {customers.map((c) => (
+                {clientesDisponibles.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name} {c.document_number ? `(${c.document_number})` : ""}
                   </option>
