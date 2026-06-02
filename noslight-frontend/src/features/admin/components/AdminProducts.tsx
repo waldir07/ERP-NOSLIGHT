@@ -57,11 +57,6 @@ export default function AdminProducts() {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  // 4. NUEVO: Al escribir en el buscador, regresamos siempre a la página 1 para evitar desfases
-  const handleSearchChange = (value: string) => {
-    setSearchTerm(value);
-    setPage(1);
-  };
 
   const handleCreateClick = () => {
     setEditingProduct(null);

@@ -54,15 +54,6 @@ export default function ImportacionesPage() {
     return invoiceMatch && dateMatch;
   });
 
-  const handleNuevaImportacionCreada = (newId?: number) => {
-    setShowNuevaModal(false);
-    if (newId) {
-      setSelectedImportacionId(newId);
-      setShowGastosModal(true);
-    } else {
-      queryClient.invalidateQueries({ queryKey: ["importaciones"] });
-    }
-  };
 
   const handleAbrirGastos = (id: number) => {
     setSelectedImportacionId(id);
@@ -120,7 +111,7 @@ export default function ImportacionesPage() {
       {/* Buscador */}
       <div className="bg-white rounded-2xl shadow p-6">
         <div className="flex gap-4 flex-wrap">
-          <div className="flex-1 min-w-[250px]">
+          <div className="flex-1 min-w-62.5">
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Código de Invoice
             </label>
@@ -133,7 +124,7 @@ export default function ImportacionesPage() {
             />
           </div>
 
-          <div className="flex-1 min-w-[200px]">
+          <div className="flex-1 min-w-50">
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Desde
             </label>
@@ -145,7 +136,7 @@ export default function ImportacionesPage() {
             />
           </div>
 
-          <div className="flex-1 min-w-[200px]">
+          <div className="flex-1 min-w-50">
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Hasta
             </label>

@@ -120,7 +120,7 @@ export default function AdjustmentForm({ products, onSave, userRole }: Adjustmen
         <div>
           <label className="block text-[10px] font-black text-gray-400 uppercase mb-2 ml-1">Notas / Justificación</label>
           <textarea 
-            className="w-full border-2 border-gray-100 rounded-2xl p-4 bg-gray-50 outline-none focus:border-blue-500 min-h-[100px]"
+            className="w-full border-2 border-gray-100 rounded-2xl p-4 bg-gray-50 outline-none focus:border-blue-500 min-h-25"
             value={formData.notes}
             onChange={(e) => setFormData({...formData, notes: e.target.value})}
             placeholder="Explica qué pasó..."

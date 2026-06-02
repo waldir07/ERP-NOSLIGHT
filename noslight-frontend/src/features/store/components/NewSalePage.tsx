@@ -317,7 +317,7 @@ export default function NewSalePage() {
       </div>
 
       {/* PANEL DERECHO: EL CARRITO */}
-      <div className="w-[400px] xl:w-[450px] flex flex-col bg-white rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden shrink-0 relative">
+      <div className="w-100 xl:w-112.5 flex flex-col bg-white rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden shrink-0 relative">
         <div className="p-6 bg-gray-900 text-white shrink-0">
           <div className="flex items-center gap-3">
             <ShoppingCart className="text-blue-400" />

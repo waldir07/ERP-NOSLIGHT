@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Plus, Trash2, Wallet, User } from "lucide-react";
+import { X, Plus, Trash2, Wallet } from "lucide-react";
 
 const YAPE_ACCOUNTS = ["Hermelinda", "Piero", "José", "Waldir"];
 const BANK_ACCOUNTS = [
@@ -414,23 +414,7 @@ export default function CheckoutModal({
     }, 1000);
   };
 
-  // Envía un mini-trabajo de impresión invisible para mandar el pulso de apertura a la ticketera
-  const abrirGavetaSinImprimir = () => {
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) return;
-
-    // Código de pulso eléctrico estándar para cajas registradoras
-    const comandoApertura = String.fromCharCode(27, 112, 48, 25, 250);
-
-    printWindow.document.write(`
-      <html>
-        <body onload="window.print(); window.close();">
-          <span style="color: white; font-size: 1px;">${comandoApertura}</span>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-  };
+  
 
   // 🧠 FILTRO DINÁMICO DE CLIENTES:
   // Si es crédito, solo muestra a los que tienen 'has_credit'. Si es contado, los muestra todos.
@@ -576,7 +560,7 @@ export default function CheckoutModal({
                 </div>
 
                 <div className="space-y-3 flex-1">
-                  {payments.map((p, index) => (
+                  {payments.map((p) => (
                     <div
                       key={p.id}
                       className="bg-white p-4 rounded-2xl border flex items-center gap-3"

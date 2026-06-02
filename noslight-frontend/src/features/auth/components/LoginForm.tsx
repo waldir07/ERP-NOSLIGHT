@@ -40,7 +40,7 @@ export default function LoginForm() {
   // ... imports y states iguales ...
 
   return (
-    <div className="w-full min-h-screen bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center px-4 sm:px-6 lg:px-8">
+    <div className="w-full min-h-screen bg-linear-to-br from-gray-100 to-gray-200 flex items-center justify-center px-4 sm:px-6 lg:px-8">
       <div className="w-full max-w-lg lg:max-w-2xl bg-white rounded-2xl shadow-xl p-8 sm:p-10 lg:p-12 transform transition-all hover:shadow-2xl">
         {/* Título */}
         <div className="text-center mb-8">

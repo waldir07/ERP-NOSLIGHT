@@ -4,7 +4,6 @@ import {
   RouterProvider,
   Navigate,
   Outlet,
-  Link,
 } from "react-router-dom";
 
 import LoginForm from "@/features/auth/components/LoginForm"; // sin llaves si es default export

@@ -3,7 +3,6 @@ import {
   Search,
   Clock,
   Users,
-  ChevronRight,
   ChevronDown,
   FileText,
   CheckCircle,
@@ -31,8 +30,6 @@ export default function CreditsPage() {
 
   // Estados para el Modal de Cobranzas
   const [selectedAccount, setSelectedAccount] = useState<any | null>(null);
-  const [paymentAmount, setPaymentAmount] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("efectivo");
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
   // 1. EL CANDADO DEFINITIVO (Leyendo el JSON de noslight_user)
@@ -80,7 +77,7 @@ export default function CreditsPage() {
     openAccountStatement(selectedAccount, start, end); // Vuelve a pedir el mes actual
   };
 
-  const [statementYear, setStatementYear] = useState(new Date().getFullYear());
+  
   const [isLoadingStatement, setIsLoadingStatement] = useState(false);
 
   const toggleDay = (date: string) => {
@@ -775,7 +772,7 @@ export default function CreditsPage() {
       </div>
 
       {/* ÁREA PRINCIPAL */}
-      <div className="flex-1 bg-white border border-gray-200 rounded-[32px] overflow-hidden shadow-sm flex flex-col">
+      <div className="flex-1 bg-white border border-gray-200 rounded-4xl overflow-hidden shadow-sm flex flex-col">
         {/* ========================================================= */}
         {/* VISTA 1: DESPACHOS PENDIENTES */}
         {/* ========================================================= */}
@@ -875,7 +872,7 @@ export default function CreditsPage() {
                 {filteredAccounts.map((account) => (
                   <div
                     key={account.id}
-                    className="bg-white border border-gray-200 rounded-[24px] p-6 hover:shadow-lg transition-shadow flex flex-col"
+                    className="bg-white border border-gray-200 rounded-3xl p-6 hover:shadow-lg transition-shadow flex flex-col"
                   >
                     <div className="flex justify-between items-start mb-4">
                       <div className="flex items-center gap-3">
@@ -927,7 +924,7 @@ export default function CreditsPage() {
       {/* ========================================================= */}
       {selectedGroup && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-[32px] w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+          <div className="bg-white rounded-4xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
             <div className="bg-gray-900 p-6 flex justify-between items-center text-white shrink-0">
               <div>
                 <h2 className="text-xl font-black flex items-center gap-2">
@@ -1049,7 +1046,7 @@ export default function CreditsPage() {
       {/* ========================================================= */}
       {selectedAccount && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-[32px] w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col h-[90vh]">
+          <div className="bg-white rounded-4xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col h-[90vh]">
             {/* Cabecera Negra */}
             <div className="bg-gray-900 p-6 flex justify-between items-center text-white shrink-0">
               <div>
