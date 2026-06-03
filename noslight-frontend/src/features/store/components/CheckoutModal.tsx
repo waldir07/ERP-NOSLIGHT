@@ -1,15 +1,8 @@
 import { useState, useEffect } from "react";
 import { X, Plus, Trash2, Wallet } from "lucide-react";
 
-const YAPE_ACCOUNTS = ["Hermelinda", "Piero", "José", "Waldir"];
-const BANK_ACCOUNTS = [
-  "BCP HERMELINDA",
-  "BCP JUNSU",
-  "BCP KYF",
-  "BCP NOSLIGHT",
-  "BCP PIERO",
-  "BBVA HERMELINDA",
-];
+
+
 
 interface PaymentLine {
   id: string;
@@ -47,6 +40,9 @@ export default function CheckoutModal({
 
   const [valeCode, setValeCode] = useState('');
   const [isValidatingVale, setIsValidatingVale] = useState(false);
+
+  const [yapeAccounts, setYapeAccounts] = useState<string[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<string[]>([]);
 
 
   const handleApplyVale = async () => {
@@ -123,6 +119,27 @@ export default function CheckoutModal({
     fetchCustomers();
   }, []);
 
+  // 2. CARGAR CONFIGURACIONES DE PAGOS (El nuevo)
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const token = localStorage.getItem("noslight_token");
+        const res = await fetch(import.meta.env.VITE_API_URL + "/api/settings", {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          // Guardamos las listas (si no hay nada, ponemos un array vacío [])
+          setYapeAccounts(data.yape_accounts || []);
+          setBankAccounts(data.bank_accounts || []);
+        }
+      } catch (error) {
+        console.error("Error al cargar configuraciones de pago:", error);
+      }
+    };
+    fetchSettings();
+  }, []);
+
   const totalPaid = payments.reduce(
     (sum, p) => sum + (parseFloat(p.amount) || 0),
     0,
@@ -137,7 +154,7 @@ export default function CheckoutModal({
       {
         id: Math.random().toString(),
         method: "yape",
-        destination: YAPE_ACCOUNTS[0],
+        destination: yapeAccounts[0],
         amount: suggestedAmount,
       },
     ]);
@@ -158,8 +175,8 @@ export default function CheckoutModal({
         const newP = { ...p, [field]: value };
         if (field === "method") {
           if (value === "efectivo") newP.destination = "Caja Principal";
-          if (value === "yape") newP.destination = YAPE_ACCOUNTS[0];
-          if (value === "transferencia") newP.destination = BANK_ACCOUNTS[0];
+          if (value === "yape") newP.destination = yapeAccounts[0];
+          if (value === "transferencia") newP.destination = bankAccounts[0];
         }
         return newP;
       });
@@ -220,7 +237,7 @@ export default function CheckoutModal({
 
         if (newBalance > creditLimit) {
           const proceed = window.confirm(`⚠️ ADVERTENCIA DE LÍMITE:\n\nEsta venta superará el límite de crédito del cliente.\nLímite permitido: S/ ${creditLimit.toFixed(2)}\nNuevo saldo proyectado: S/ ${newBalance.toFixed(2)}\n\n¿Deseas autorizar y guardar esta venta de todos modos?`);
-          
+
           if (!proceed) {
             return; // Aborta y detiene la venta si el cajero le da a "Cancelar"
           }
@@ -414,12 +431,12 @@ export default function CheckoutModal({
     }, 1000);
   };
 
-  
+
 
   // 🧠 FILTRO DINÁMICO DE CLIENTES:
   // Si es crédito, solo muestra a los que tienen 'has_credit'. Si es contado, los muestra todos.
-  const clientesDisponibles = saleType === "credito" 
-    ? customers.filter(c => c.has_credit === true || c.has_credit === 1) 
+  const clientesDisponibles = saleType === "credito"
+    ? customers.filter(c => c.has_credit === true || c.has_credit === 1)
     : customers;
 
   // ... (el resto del JSX se mantiene igual al que te di antes, compacto)
@@ -463,7 +480,7 @@ export default function CheckoutModal({
                 <button
                   onClick={() => {
                     setSaleType("credito");
-                    
+
                     // 🐛 BUGFIX: El cazador de fantasmas
                     // Si el cliente actual NO tiene crédito, lo borramos de la memoria al cambiar de pestaña
                     const customer = customers.find(c => c.id.toString() === selectedCustomerId);
@@ -608,8 +625,8 @@ export default function CheckoutModal({
                               className="flex-1 bg-gray-50 border rounded-xl px-3 py-2 font-medium"
                             >
                               {(p.method === "yape"
-                                ? YAPE_ACCOUNTS
-                                : BANK_ACCOUNTS
+                                ? yapeAccounts
+                                : bankAccounts
                               ).map((opt) => (
                                 <option key={opt} value={opt}>
                                   {opt}
@@ -617,7 +634,7 @@ export default function CheckoutModal({
                               ))}
                             </select>
                           )}
-                          
+
                           {p.method === "efectivo" && (
                             <div className="flex-1 text-center text-gray-500 font-medium">
                               Caja Principal

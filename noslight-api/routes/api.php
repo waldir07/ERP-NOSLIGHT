@@ -17,6 +17,8 @@ use App\Http\Controllers\Api\CreditController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\InventoryAdjustmentController;
+use App\Http\Controllers\SettingController; // Asegúrate de importar el controlador arriba
+
 
 
 /*
@@ -53,6 +55,10 @@ Route::middleware('auth:sanctum')->group(function () {
         ->parameters(['importaciones' => 'importacion']); // Fuerza el nombre correcto para la variable
 
     Route::post('/importaciones/{importacion}/gastos', [ImportacionController::class, 'agregarGastos']);
+
+    // Rutas de configuración
+    Route::get('/settings', [SettingController::class, 'index']);
+    Route::post('/settings', [SettingController::class, 'store']);
 });
 
 
@@ -139,12 +145,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     //momentaneo para inyección
     Route::post('/admin/inventory/bulk-inject', [InventoryAdjustmentController::class, 'bulkAdminInject']);
-
-
 });
-    //inyeccion de excel
+//inyeccion de excel
 
-    Route::post('/products/import', [ProductController::class, 'importExcel']);
-    Route::get('/products/export', [ProductController::class, 'exportExcel']);
-
-
+Route::post('/products/import', [ProductController::class, 'importExcel']);
+Route::get('/products/export', [ProductController::class, 'exportExcel']);

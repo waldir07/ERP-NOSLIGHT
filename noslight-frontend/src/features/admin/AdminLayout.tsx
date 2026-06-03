@@ -10,6 +10,7 @@ const adminSidebarItems = [
   { label: "Auditoría de Stock", path: "/admin/auditoria-stock" },   // ← NUEVO
   { label: "Aprobación de Créditos", path: "/admin/credits" },
   { label: "Clientes", path: "/admin/customers" },
+  { label: "Configuración", path: "/admin/settings" },
   { label: "Reportes", path: "/admin/reports" },
 ];
 

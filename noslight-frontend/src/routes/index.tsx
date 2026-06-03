@@ -26,6 +26,7 @@ import TransferHistoryPage from "@/features/warehouse/components/TransferDetailM
 import StoreRoutes from "@/features/store/StoreRoutes";
 import CreditsPage from '@/features/store/components/CreditsPage'; // (Ajusta los puntitos según tu carpeta)
 import CustomersPage from '@/features/admin/components/CustomersPage'; // Asegúrate de que la ruta coincida con tu carpeta
+import SettingsPage from '@/features/admin/components/SettingsPage'; // O la ruta donde lo hayas guardado
 
 
 // Componente dummy (corrige la sintaxis)
@@ -75,8 +76,10 @@ const router = createBrowserRouter([
           { path: "auditoria-stock", element: <InventoryAuditPage /> },
           { path: "credits", element: <CreditsPage /> },
           { path: "customers", element: <CustomersPage /> },
+          { path: "settings", element: <SettingsPage /> },
           { path: "reports", element: <div>Reportes (en construcción)</div> },
           // Agrega más rutas aquí
+          
         ],
       },
     ],

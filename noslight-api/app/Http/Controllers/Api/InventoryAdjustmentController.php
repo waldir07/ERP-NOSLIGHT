@@ -213,7 +213,8 @@ class InventoryAdjustmentController extends Controller
         }
 
         $user = auth()->id();
-        $warehouseId = $product->is_raw ? 1 : 2;
+        //$warehouseId = $product->is_raw ? 1 : 2;
+        $warehouseId = 1;
         $warehouse = \App\Models\Warehouse::find($warehouseId);
 
         if (!$warehouse) {
