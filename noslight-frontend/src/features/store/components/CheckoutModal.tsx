@@ -274,7 +274,7 @@ export default function CheckoutModal({
         // 2. CONTROL INTELIGENTE DE GAVETA
         // Validamos si hay efectivo real involucrado en la transacción
         const hasEfectivoReal = payments.some(
-          (p: any) => p.method === "efectivo" && (parseFloat(p.amount) || 0) > 0
+          (p: any) => p.method && p.method.toLowerCase() === "efectivo" && (parseFloat(p.amount) || 0) > 0
         );
 
         // SI ES CONTADO Y TIENE EFECTIVO, LLAMAMOS AL ASISTENTE LOCAL
