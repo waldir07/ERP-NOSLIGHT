@@ -92,7 +92,7 @@ export default function CashClosure() {
             setMessage("");
 
             const response = await fetch(
-                "http://127.0.0.1:8000/api/cash-closures/daily-summary",
+                import.meta.env.VITE_API_URL + "/api/cash-closures/daily-summary",
                 {
                     method: "GET",
                     headers: getAuthHeaders(),
@@ -177,7 +177,7 @@ export default function CashClosure() {
             };
 
             const response = await fetch(
-                "http://127.0.0.1:8000/api/cash-closures",
+                import.meta.env.VITE_API_URL + "/api/cash-closures",
                 {
                     method: "POST",
                     headers: getAuthHeaders(),
