@@ -24,25 +24,25 @@ export default function InventoryAuditPage() {
   const { success, error } = useToast();
 
   // Paginación y Filtros
-  const [debouncedSearch, setDebouncedSearch] = useState('');
+  //const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
   const [lastPage, setLastPage] = useState(1);
 
   const [processingKey, setProcessingKey] = useState<string | null>(null);
 
   // 1. Debounce para el buscador (espera 500ms)
-  useEffect(() => {
+  /*useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(searchTerm);
       setPage(1); // Si buscas algo nuevo, regresamos a la página 1
     }, 500);
     return () => clearTimeout(timer);
-  }, [searchTerm]);
+  }, [searchTerm]);*/
 
   // 2. Efecto para recargar cuando cambia la página, la búsqueda o el filtro
   useEffect(() => {
-    loadUnifiedStock(page, debouncedSearch, filterType);
-  }, [page, debouncedSearch, filterType]);
+    loadUnifiedStock(page, searchTerm, filterType);
+  }, [page, filterType]);
 
   const loadUnifiedStock = async (currentPage: number, search: string, type: string) => {
     setLoading(true);
@@ -113,12 +113,12 @@ export default function InventoryAuditPage() {
 
       if (res.ok) {
         const data = await res.json();
-        const mensaje = accion === 'SUMAR' 
+        const mensaje = accion === 'SUMAR'
           ? `🚀 ${item.sku}: ¡Se inyectaron +${Math.abs(quantity)} unidades con éxito!`
           : `📉 ${item.sku}: ¡Se descontaron -${Math.abs(quantity)} unidades!`;
-        
+
         success(mensaje);
-        
+
         setItems(prev => prev.map(p => {
           const matchCondition = p.product_id === item.product_id && p.variant_id === item.variant_id;
           return matchCondition ? { ...p, current_stock: data.new_stock } : p;
@@ -148,26 +148,34 @@ export default function InventoryAuditPage() {
           <h1 className="text-3xl font-black text-gray-800">🛠️ PANEL MAESTRO DE AJUSTES</h1>
           <p className="text-gray-500 font-medium">Control total (Modo Dios): Suma o resta inventario de forma inmediata.</p>
         </div>
-        {/* Tu firma y versión aquí */}
-        <div className="text-right">
-          <span className="bg-gray-800 text-white px-3 py-1 rounded-full text-xs font-bold shadow-sm">
-            v1.1.0
-          </span>
-          <p className="text-[10px] text-gray-400 mt-1 uppercase font-bold tracking-widest">
-            Hecho por Waldir
-          </p>
-        </div>
       </div>
 
       <div className="flex flex-col md:flex-row gap-4 mb-6">
-        <input
-          type="text"
-          placeholder="🔍 Buscar por SKU, código base o nombre del interruptor..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="flex-1 bg-white border rounded-2xl px-4 py-3 font-medium shadow-sm outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-        />
-
+        <div className="flex-1 relative flex gap-2">
+          <input
+            type="text"
+            placeholder="🔍 Escribe el SKU exacto y presiona ENTER para buscar..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            onKeyDown={(e) => {
+              // Al presionar ENTER dispara una única petición manual
+              if (e.key === 'Enter') {
+                setPage(1);
+                loadUnifiedStock(1, searchTerm, filterType);
+              }
+            }}
+            className="flex-1 bg-white border rounded-2xl px-4 py-3 font-medium shadow-sm outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+          />
+          <button
+            onClick={() => {
+              setPage(1);
+              loadUnifiedStock(1, searchTerm, filterType);
+            }}
+            className="bg-gray-800 text-white px-6 py-3 rounded-2xl font-bold hover:bg-gray-700 transition-all shadow-sm cursor-pointer"
+          >
+            Buscar
+          </button>
+        </div>
         <div className="flex bg-white border p-1 rounded-2xl shadow-sm font-bold text-xs">
           <button onClick={() => { setFilterType('ALL'); setPage(1); }} className={`px-4 py-2 rounded-xl transition-all ${filterType === 'ALL' ? 'bg-gray-900 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>Todos</button>
           <button onClick={() => { setFilterType('RAW'); setPage(1); }} className={`px-4 py-2 rounded-xl transition-all ${filterType === 'RAW' ? 'bg-orange-500 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>📦 Solo Base (Raw)</button>
@@ -222,8 +230,8 @@ export default function InventoryAuditPage() {
                           onClick={() => handleAjuste(item, rowKey, 'SUMAR')}
                           disabled={processingKey === rowKey}
                           className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center shadow-sm ${processingKey === rowKey
-                              ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                              : 'bg-green-600 hover:bg-green-700 text-white'
+                            ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                            : 'bg-green-600 hover:bg-green-700 text-white'
                             }`}
                         >
                           {processingKey === rowKey ? '⏳...' : '+ Añadir'}
@@ -233,8 +241,8 @@ export default function InventoryAuditPage() {
                           onClick={() => handleAjuste(item, rowKey, 'RESTAR')}
                           disabled={processingKey === rowKey}
                           className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center shadow-sm ${processingKey === rowKey
-                              ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                              : 'bg-red-500 hover:bg-red-600 text-white'
+                            ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                            : 'bg-red-500 hover:bg-red-600 text-white'
                             }`}
                         >
                           {processingKey === rowKey ? '⏳...' : '- Restar'}
@@ -269,6 +277,6 @@ export default function InventoryAuditPage() {
           </div>
         )}
       </div>
-    </div>
+    </div >
   );
 }

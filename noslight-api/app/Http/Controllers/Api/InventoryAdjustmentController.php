@@ -106,7 +106,7 @@ class InventoryAdjustmentController extends Controller
     // --- LAS 2 FUNCIONES NUEVAS DEL MODO DIOS ---
 
     // 1. Obtener la lista unificada (Con Paginación y Filtros Inteligentes)
-    public function getAdminUnifiedStockList(Request $request)
+    /*public function getAdminUnifiedStockList(Request $request)
     {
         $products = \App\Models\Product::all();
         $warehouses = \App\Models\Warehouse::all()->keyBy('id');
@@ -196,7 +196,96 @@ class InventoryAdjustmentController extends Controller
         }
 
         return response()->json($result);
+    }*/
+
+    public function getAdminUnifiedStockList(Request $request)
+    {
+        $search = $request->input('search');
+        $type = $request->input('type', 'ALL');
+        $page = (int) $request->input('page', 1);
+        $perPage = 15;
+
+        // 1. Cargamos Almacenes en memoria quieto (solo son 2)
+        $warehouses = \App\Models\Warehouse::all()->keyBy('id');
+        $almacenRaw = $warehouses->get(1);
+        $tienda = $warehouses->get(2);
+
+        // 2. Base de la consulta usando un Query Builder (Filtrado Real en Base de Datos)
+        // Buscamos primero en las variantes, ya que ahí están los SKUs individuales
+        $query = \App\Models\ProductVariant::query()
+            ->join('products', 'product_variants.product_id', '=', 'products.id')
+            ->select(
+                'products.id as product_id',
+                'product_variants.id as variant_id',
+                'products.name',
+                'products.base_code',
+                'product_variants.sku',
+                'products.brand',
+                'product_variants.amperage',
+                'products.is_raw'
+            );
+
+        // 3. APLICAR FILTROS DIRECTOS EN LA BASE DE DATOS ⚡
+        if ($type !== 'ALL') {
+            $query->where('products.is_raw', $type === 'RAW' ? 1 : 0);
+        }
+
+        if (!empty($search)) {
+            // Buscamos coincidencia exacta por el SKU de la variante
+            // O por el código base si el producto no tuviera variante directa
+            $query->where(function ($q) use ($search) {
+                $q->where('product_variants.sku', '=', $search)
+                    ->orWhere('products.base_code', '=', $search);
+            });
+        }
+
+        // 4. Paginamos directamente en la Base de Datos (Solo procesa 15 registros, no miles)
+        $paginated = $query->paginate($perPage, ['*'], 'page', $page);
+
+        // 5. Mapeamos SOLAMENTE los 15 resultados de esta página para inyectarles el stock actual
+        $items = collect($paginated->items())->map(function ($item) use ($almacenRaw, $tienda) {
+            $targetWarehouse = $item->is_raw ? $almacenRaw : $tienda;
+            $stockQty = 0;
+
+            if ($targetWarehouse) {
+                $stock = \App\Models\Stock::where('product_variant_id', $item->variant_id)
+                    ->where('warehouse_id', $targetWarehouse->id)
+                    ->first();
+                $stockQty = $stock ? $stock->quantity : 0;
+            }
+
+            // Devolvemos el mismo formato exacto que tenías
+            return [
+                'product_id' => $item->product_id,
+                'variant_id' => $item->variant_id,
+                'name' => $item->name,
+                'base_code' => $item->base_code,
+                'sku' => $item->sku ?? ($item->is_raw ? 'M-' . $item->base_code : $item->base_code),
+                'brand' => $item->brand,
+                'amperage' => $item->amperage,
+                'is_raw' => (bool)$item->is_raw,
+                'current_stock' => $stockQty,
+                'warehouse_name' => $item->is_raw ? 'Almacén (Raw)' : 'Tienda (Terminado)'
+            ];
+        });
+
+        // 6. Retornamos la respuesta paginada idéntica a como la espera React
+        return response()->json([
+            'current_page' => $paginated->currentPage(),
+            'data' => $items,
+            'first_page_url' => $paginated->url(1),
+            'from' => $paginated->firstItem(),
+            'last_page' => $paginated->lastPage(),
+            'last_page_url' => $paginated->url($paginated->lastPage()),
+            'next_page_url' => $paginated->nextPageUrl(),
+            'path' => $request->url(),
+            'per_page' => $paginated->perPage(),
+            'prev_page_url' => $paginated->previousPageUrl(),
+            'to' => $paginated->lastItem(),
+            'total' => $paginated->total(),
+        ]);
     }
+
 
     // 2. Ajuste directo fila por fila (Modo Dios: Blindado contra negativos)
     public function injectSingleRowStock(Request $request)
