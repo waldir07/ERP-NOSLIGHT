@@ -32,7 +32,7 @@ export default function TransformForm() {
     // Para descartar que el filtro sea el culpable, vamos a imprimir cada item
     console.log("Evaluando item:", item);
 
-   
+
 
     //2. Si no hay término de búsqueda, mostrar todo
     if (!searchTerm) return true; // Si no hay término de búsqueda, mostrar todo
@@ -162,41 +162,50 @@ export default function TransformForm() {
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 space-y-2">
-          {filteredRawStock.length === 0 ? (
+          {filteredRawStock.filter((item: StockItem) => {
+            // Evaluamos cómo viene el SKU exactamente igual a como lo pintas abajo
+            const sku = item.product_variant?.sku || `M-${item.product_variant?.product?.base_code}`;
+            // ⚡ SOLO dejamos pasar los que comiencen con "M-"
+            return sku && sku.startsWith('M-');
+          }).length === 0 ? (
             <p className="text-center text-gray-500 py-8 text-sm">
               No se encontraron productos raw.
             </p>
           ) : (
-            filteredRawStock.map((item: StockItem) => {
-              const sku =
-                item.product_variant?.sku ||
-                `M-${item.product_variant?.product?.base_code}`;
-              const isSelected = selectedRaw?.id === item.id;
+            filteredRawStock
+              .filter((item: StockItem) => {
+                const sku = item.product_variant?.sku || `M-${item.product_variant?.product?.base_code}`;
+                return sku && sku.startsWith('M-');
+              })
+              .map((item: StockItem) => {
+                const sku =
+                  item.product_variant?.sku ||
+                  `M-${item.product_variant?.product?.base_code}`;
+                const isSelected = selectedRaw?.id === item.id;
 
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setSelectedRaw(item)}
-                  className={`w-full text-left p-3 rounded-xl border transition-all ${
-                    isSelected
-                      ? "bg-blue-50 border-blue-500 shadow-sm"
-                      : "bg-white border-gray-100 hover:border-blue-300 hover:bg-gray-50"
-                  }`}
-                >
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <p className="font-bold text-gray-900 text-sm">{sku}</p>
-                      <p className="text-xs text-gray-600 line-clamp-1">
-                        {item.product_variant?.product?.name}
-                      </p>
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setSelectedRaw(item)}
+                    className={`w-full text-left p-3 rounded-xl border transition-all ${isSelected
+                        ? "bg-blue-50 border-blue-500 shadow-sm"
+                        : "bg-white border-gray-100 hover:border-blue-300 hover:bg-gray-50"
+                      }`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="font-bold text-gray-900 text-sm">{sku}</p>
+                        <p className="text-xs text-gray-600 line-clamp-1">
+                          {item.product_variant?.product?.name}
+                        </p>
+                      </div>
+                      <div className="bg-gray-800 text-white text-xs font-bold px-2 py-1 rounded-lg">
+                        {item.quantity} und
+                      </div>
                     </div>
-                    <div className="bg-gray-800 text-white text-xs font-bold px-2 py-1 rounded-lg">
-                      {item.quantity} und
-                    </div>
-                  </div>
-                </button>
-              );
-            })
+                  </button>
+                );
+              })
           )}
         </div>
       </div>
@@ -255,11 +264,10 @@ export default function TransformForm() {
                       <button
                         key={finished.finished_product_id}
                         onClick={() => setSelectedFinished(finished)}
-                        className={`text-left p-4 rounded-xl border-2 transition-all ${
-                          isSelected
+                        className={`text-left p-4 rounded-xl border-2 transition-all ${isSelected
                             ? "border-blue-600 bg-blue-50 shadow-md"
                             : "border-gray-200 bg-white hover:border-blue-300"
-                        }`}
+                          }`}
                       >
                         <p className="font-bold text-gray-900 text-sm mb-1">
                           {finished.sku}
