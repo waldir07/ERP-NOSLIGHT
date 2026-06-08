@@ -16,6 +16,16 @@ export default function TransformForm() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedRaw, setSelectedRaw] = useState<StockItem | null>(null);
 
+  // 🟢 AGREGA ESTE NUEVO ESTADO AQUÍ:
+  const [visibleCount, setVisibleCount] = useState(15);
+
+  // 🟢 AGREGA ESTE EFECTO PARA REINICIAR EL LÍMITE AL BUSCAR:
+  useEffect(() => {
+    setVisibleCount(10);
+  }, [searchTerm]);
+
+
+
   // Estados del formulario (Detalle)
   const [possibleFinished, setPossibleFinished] = useState<any[]>([]);
   const [selectedFinished, setSelectedFinished] = useState<any | null>(null);
@@ -161,7 +171,7 @@ export default function TransformForm() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-2 space-y-2">
+        {/*<div className="flex-1 overflow-y-auto p-2 space-y-2">
           {filteredRawStock.filter((item: StockItem) => {
             // Evaluamos cómo viene el SKU exactamente igual a como lo pintas abajo
             const sku = item.product_variant?.sku || `M-${item.product_variant?.product?.base_code}`;
@@ -188,8 +198,8 @@ export default function TransformForm() {
                     key={item.id}
                     onClick={() => setSelectedRaw(item)}
                     className={`w-full text-left p-3 rounded-xl border transition-all ${isSelected
-                        ? "bg-blue-50 border-blue-500 shadow-sm"
-                        : "bg-white border-gray-100 hover:border-blue-300 hover:bg-gray-50"
+                      ? "bg-blue-50 border-blue-500 shadow-sm"
+                      : "bg-white border-gray-100 hover:border-blue-300 hover:bg-gray-50"
                       }`}
                   >
                     <div className="flex justify-between items-start">
@@ -207,6 +217,69 @@ export default function TransformForm() {
                 );
               })
           )}
+        </div>*/}
+
+        {/* 🟢 PEGA ESTE BLOQUE OPTIMIZADO AQUÍ: */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-2">
+          {(() => {
+            const rawFiltradosCompletos = filteredRawStock.filter((item: StockItem) => {
+              const sku = item.product_variant?.sku || `M-${item.product_variant?.product?.base_code}`;
+              return sku && sku.startsWith('M-');
+            });
+
+            if (rawFiltradosCompletos.length === 0) {
+              return (
+                <p className="text-center text-gray-500 py-8 text-sm">
+                  No se encontraron productos raw.
+                </p>
+              );
+            }
+
+            const itemsVisibles = rawFiltradosCompletos.slice(0, visibleCount);
+
+            return (
+              <>
+                {itemsVisibles.map((item: StockItem) => {
+                  const sku = item.product_variant?.sku || `M-${item.product_variant?.product?.base_code}`;
+                  const isSelected = selectedRaw?.id === item.id;
+
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => setSelectedRaw(item)}
+                      className={`w-full text-left p-3 rounded-xl border transition-all ${
+                        isSelected
+                          ? "bg-blue-50 border-blue-500 shadow-sm"
+                          : "bg-white border-gray-100 hover:border-blue-300 hover:bg-gray-50"
+                      }`}
+                    >
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-bold text-gray-900 text-sm">{sku}</p>
+                          <p className="text-xs text-gray-600 line-clamp-1">
+                            {item.product_variant?.product?.name}
+                          </p>
+                        </div>
+                        <div className="bg-gray-800 text-white text-xs font-bold px-2 py-1 rounded-lg">
+                          {item.quantity} und
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+
+                {rawFiltradosCompletos.length > visibleCount && (
+                  <button
+                    type="button"
+                    onClick={() => setVisibleCount((prev) => prev + 15)}
+                    className="w-full py-2.5 mt-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl transition-all border border-gray-200 shadow-sm text-center cursor-pointer"
+                  >
+                    ➕ Ver más productos ({rawFiltradosCompletos.length - visibleCount} restantes)
+                  </button>
+                )}
+              </>
+            );
+          })()}
         </div>
       </div>
 
@@ -265,8 +338,8 @@ export default function TransformForm() {
                         key={finished.finished_product_id}
                         onClick={() => setSelectedFinished(finished)}
                         className={`text-left p-4 rounded-xl border-2 transition-all ${isSelected
-                            ? "border-blue-600 bg-blue-50 shadow-md"
-                            : "border-gray-200 bg-white hover:border-blue-300"
+                          ? "border-blue-600 bg-blue-50 shadow-md"
+                          : "border-gray-200 bg-white hover:border-blue-300"
                           }`}
                       >
                         <p className="font-bold text-gray-900 text-sm mb-1">
