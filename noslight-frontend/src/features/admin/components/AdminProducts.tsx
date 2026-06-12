@@ -57,7 +57,7 @@ export default function AdminProducts() {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-
+  
   const handleCreateClick = () => {
     setEditingProduct(null);
     setView("form");

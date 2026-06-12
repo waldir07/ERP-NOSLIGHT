@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Search, CreditCard, DollarSign, Wallet, Printer, ChevronDown, ChevronUp } from 'lucide-react'; // Opcional: Si usas lucide-react para iconos, si no, usa texto plano.
-import api from "../../../lib/axios"; // Revisa que la ruta apunte correctamente a tu src/lib/axios
 import { jsPDF } from "jspdf";
 
 export const SalesHistoryPage = () => {
@@ -10,8 +8,8 @@ export const SalesHistoryPage = () => {
   const [expandedSaleId, setExpandedSaleId] = useState<number | null>(null);
 
   // Estados para la paginación
-  const [page, setPage] = useState(1);
-  const [lastPage, setLastPage] = useState(1);
+  const [page, setPage] = useState<number>(1);
+  const [lastPage, setLastPage] = useState<number>(1);
   const [totalSalesCount, setTotalSalesCount] = useState(0);
 
   // Estados para los Filtros
@@ -53,9 +51,28 @@ export const SalesHistoryPage = () => {
   const [isProcessingExchange, setIsProcessingExchange] = useState(false);
 
 
+  const [currentPage, setCurrentPage] = useState(1);
+
+
+
   // 🟢 NUEVO ESTADO PARA LA CUENTA DE DESTINO
   const [exchangePaymentDestination, setExchangePaymentDestination] = useState('Caja Principal');
 
+  const filtrarHoy = () => {
+    const hoy = new Date().toISOString().split('T')[0];
+    setStartDate(hoy);
+    setEndDate(hoy);
+    setPage(1); // <-- Número puro, sin comillas
+  };
+
+  const filtrarAyer = () => {
+    const ayerDate = new Date();
+    ayerDate.setDate(ayerDate.getDate() - 1);
+    const ayer = ayerDate.toISOString().split('T')[0];
+    setStartDate(ayer);
+    setEndDate(ayer);
+    setPage(1); // <-- Número puro, sin comillas
+  };
 
   // EFECTO DEBOUNCE: Retarda la actualización de la búsqueda real por 400 milisegundos
   useEffect(() => {
@@ -68,7 +85,7 @@ export const SalesHistoryPage = () => {
   // Escucha todos los filtros estables para recargar la tabla desde Laravel
   useEffect(() => {
     fetchSalesData();
-  }, [page, startDate, endDate, saleType, debouncedSearch, brand, model, amperage, polarity]);
+  }, [page, startDate, endDate, saleType, debouncedSearch, brand, model, amperage, polarity, searchQuery, currentPage]);
 
 
 
@@ -92,14 +109,16 @@ export const SalesHistoryPage = () => {
       });
 
       // 3. Hacemos el fetch nativo apuntando directo al puerto 8000 con los headers correctos
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/sales?${params.toString()}`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Authorization": `Bearer ${token}` // <-- El candado de seguridad vital
-        }
-      });
+      const response = await fetch(// ASÍ DEBE QUEDAR EDITADO:
+        `${import.meta.env.VITE_API_URL}/api/sales?${params.toString()}&page=${currentPage}`
+        , {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": `Bearer ${token}` // <-- El candado de seguridad vital
+          }
+        });
 
       if (!response.ok) {
         throw new Error(`Error en el servidor: ${response.status}`);
@@ -108,9 +127,9 @@ export const SalesHistoryPage = () => {
       const result = await response.json();
 
       // 4. Inyectamos las variables en tu hermosa interfaz
-      setSales(result.sales.data);
-      setTotalSalesCount(result.sales.total);
-      setLastPage(result.sales.last_page);
+      setSales(result.sales.data || []);
+      setTotalSalesCount(result.sales.total || 0);
+      setLastPage(result.sales.last_page || 1);
       setTotals({
         cash: parseFloat(result.kpis.cash) || 0,
         electronic: parseFloat(result.kpis.electronic) || 0,
@@ -528,10 +547,10 @@ export const SalesHistoryPage = () => {
         // ¿Se generó un vale? Avisamos
         if (data.store_credit) {
           alert(`✅ Operación exitosa.\nSe generó un VALE por S/ ${data.store_credit.amount}\nCódigo: ${data.store_credit.code}`);
-          
+
           // 🟢 IMPRIME EL VALE AUTOMÁTICAMENTE
           printStoreCreditTicket(
-            data.store_credit, 
+            data.store_credit,
             saleToExchange.customer?.name || 'Público General'
           );
         } else {
@@ -621,6 +640,22 @@ export const SalesHistoryPage = () => {
             <option value="credito">A Crédito</option>
           </select>
 
+          <button
+            type="button"
+            onClick={filtrarHoy}
+            className="px-4 py-2 bg-blue-50 text-blue-600 rounded-md text-sm font-semibold hover:bg-blue-100 transition-colors border border-blue-200"
+          >
+            📅 Hoy
+          </button>
+
+          <button
+            type="button"
+            onClick={filtrarAyer}
+            className="px-4 py-2 bg-gray-50 text-gray-600 rounded-md text-sm font-semibold hover:bg-gray-100 transition-colors border border-gray-200"
+          >
+            ⏪ Ayer
+          </button>
+
           {/* 🛑 BOTÓN DE BORRADO DE FILTROS (X) */}
           <button
             onClick={clearAllFilters}
@@ -709,12 +744,66 @@ export const SalesHistoryPage = () => {
                     <td className="p-4 font-mono font-bold text-gray-600">{sale.receipt_number}</td>
                     <td className="p-4 text-gray-500">{new Date(sale.created_at).toLocaleString('es-PE')}</td>
                     <td className="p-4 font-semibold text-gray-700">{sale.customer?.name || '👤 Público General'}</td>
+                    {/* NUEVO CÓDIGO CON LOGO OFICIAL DE YAPE EN SVG */}
                     <td className="p-4 text-center">
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase ${sale.saleType === 'credito' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'
-                        }`}>
-                        {sale.saleType}
-                      </span>
+                      <div className="flex items-center justify-center gap-2.5">
+                        {sale.saleType === 'credito' ? (
+                          <span className="px-2.5 py-1 rounded-full text-xs font-bold uppercase bg-yellow-100 text-yellow-800">
+                            Crédito
+                          </span>
+                        ) : (
+                          <>
+                            {sale.payments_net && sale.payments_net.length > 0 ? (
+                              sale.payments_net.map((p: any, idx: number) => {
+                                const method = p.method ? p.method.toLowerCase() : '';
+
+                                // 💵 CONDICIÓN PARA EFECTIVO
+                                if (method.includes('efectivo')) {
+                                  return (
+                                    <span key={idx} title="Efectivo" className="text-xl filter drop-shadow-sm cursor-help">
+                                      💵
+                                    </span>
+                                  );
+                                }
+
+                                // 📱 CONDICIÓN PARA YAPE / PLIN (CON LOGO OFICIAL DE YAPE)
+                                if (method.includes('yape') || method.includes('plin')) {
+                                  return (
+                                    <div key={idx} title="Yape / Plin" className="flex items-center justify-center w-6 h-6 bg-[#9117A0] rounded-md p-1 shadow-sm cursor-help transition-transform hover:scale-110">
+                                      <svg viewBox="0 0 100 100" className="w-full h-full fill-white">
+                                        {/* Icono vectorial simplificado: Burbuja de texto + S/ */}
+                                        <path d="M50,5 C25.1,5 5,23.1 5,45.5 C5,56.8 10.1,67 18.3,74.1 L12,92 L32.3,84.7 C37.8,86.9 43.8,88 50,88 C74.9,88 95,69.9 95,47.5 C95,25.1 74.9,5 50,5 Z" />
+                                        <text x="50" y="62" fontStyle="normal" fontWeight="900" fontSize="42" fontFamily="Arial, sans-serif" textAnchor="middle" fill="#00D2C4">S/</text>
+                                      </svg>
+                                    </div>
+                                  );
+                                }
+
+                                // 💳 CONDICIÓN PARA TRANSFERENCIA
+                                if (method.includes('transferencia') || method.includes('banco') || method.includes('bcp')) {
+                                  return (
+                                    <span key={idx} title="Transferencia" className="text-xl filter drop-shadow-sm cursor-help">
+                                      💳
+                                    </span>
+                                  );
+                                }
+
+                                return (
+                                  <span key={idx} className="text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-600 font-bold capitalize">
+                                    {p.method}
+                                  </span>
+                                );
+                              })
+                            ) : (
+                              <span className="px-2.5 py-1 rounded-full text-xs font-bold uppercase bg-green-100 text-green-800">
+                                Contado
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </td>
+
                     <td className="p-4 text-right font-extrabold text-gray-900 text-base">S/ {sale.totalAmount.toFixed(2)}</td>
 
                     {/* 🛠️ COLUMNA ACCIONES RE-DISEÑADA SIMULTÁNEA */}
@@ -794,7 +883,73 @@ export const SalesHistoryPage = () => {
             </tbody>
           </table>
         </div>
+
       </div>
+
+
+      {/* BOTONES DE PAGINACIÓN AL PIE DE LA TABLA (COMPLETAMENTE NUMÉRICO Y ORDENADO) */}
+      <div className="flex items-center justify-between border-t border-gray-200 bg-white px-4 py-3 sm:px-6 mt-4 rounded-lg shadow-sm">
+
+        {/* Vista para Celulares (Mobile) */}
+        <div className="flex flex-1 justify-between sm:hidden">
+          <button
+            onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+            disabled={page === 1}
+            className="relative inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Anterior
+          </button>
+          <button
+            onClick={() => setPage((prev) => Math.min(prev + 1, lastPage))}
+            disabled={page === lastPage}
+            className="relative ml-3 inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Siguiente
+          </button>
+        </div>
+
+        {/* Vista para Computadoras (Desktop) */}
+        <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm text-gray-700">
+              Mostrando registros de la página <span className="font-semibold text-blue-600">{page}</span> de <span className="font-medium text-gray-500">{lastPage}</span>
+            </p>
+          </div>
+          <div>
+            <nav className="isolate inline-flex items-center -space-x-px rounded-md shadow-sm gap-2" aria-label="Pagination">
+
+              {/* Botón Anterior */}
+              <button
+                onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+                disabled={page === 1}
+                className="relative inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                ⏪ Anterior
+              </button>
+
+              {/* Indicador de Páginas Central */}
+              <span className="relative inline-flex items-center border border-gray-300 bg-blue-50 px-4 py-2 rounded-md text-sm font-bold text-blue-600 shadow-sm">
+                {page} / {lastPage}
+              </span>
+
+              {/* Botón Siguiente */}
+              <button
+                onClick={() => setPage((prev) => Math.min(prev + 1, lastPage))}
+                disabled={page === lastPage}
+                className="relative inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Siguiente ⏩
+              </button>
+
+            </nav>
+          </div>
+        </div>
+      </div>
+
+
+
+
+
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         {/* Aquí renderizas tus filas con sales.map de forma habitual */}
         <div className="p-4 text-xs text-gray-400 font-mono">Panel Conectado y Sincronizado en Tiempo Real</div>

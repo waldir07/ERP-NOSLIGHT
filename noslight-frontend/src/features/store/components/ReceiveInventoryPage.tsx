@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "@/lib/axios";
 import { toast } from "react-hot-toast";
-import { AlertTriangle, CheckCircle2, ChevronRight, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, X } from "lucide-react";
 
 // 1. COMPONENTE DEL MODAL (Pégalo arriba de todo)
 function TransferDetailModal({
@@ -160,18 +160,9 @@ export default function ReceiveInventoryPage() {
     [key: number]: number;
   }>({});
   const [note, setNote] = useState("");
-  const [viewingDetails, setViewingDetails] = useState<any>(null);
-  const [isCollapsed, setIsCollapsed] = useState(false);
   const [selectedTransfer, setSelectedTransfer] = useState<any>(null);
 
-  const [filters, setFilters] = useState({
-    from: "",
-    to: "",
-    hasIssue: "all", // all, yes, no
-    amp: "",
-    poles: "",
-    search: "",
-  });
+  
 
   const [searchTerm, setSearchTerm] = useState("");
   const [ampFilter, setAmpFilter] = useState("");
@@ -258,10 +249,7 @@ export default function ReceiveInventoryPage() {
 
       console.log("🚀 PAYLOAD REAL ENVIADO:", payload);
 
-      const res = await axios.post(
-        `/api/transfers/${verifyingTransfer.id}/receive`,
-        payload,
-      );
+      
 
       toast.success("Ingreso procesado correctamente");
       setVerifyingTransfer(null);
@@ -483,7 +471,7 @@ export default function ReceiveInventoryPage() {
                         <p className="text-[10px] text-red-600 font-black uppercase italic">
                           Observación:
                         </p>
-                        <p className="text-xs text-gray-700 font-bold italic italic">
+                        <p className="text-xs text-gray-700 font-bold italic">
                           "{t.discrepancy_note}"
                         </p>
                       </div>

@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 interface Product {
   id: number | string;
   name: string;
-  brand?: string; 
+  brand?: string;
   model?: string; // <-- Nuevo
   amps: string;
   poles: string | number;
@@ -13,6 +13,82 @@ interface Product {
   minStock: number;
   sku: string;
 }
+
+// 🟢 COPIA Y PEGA ESTO EN LA PARTE SUPERIOR DEL ARCHIVO (FUERA DEL COMPONENTE PRINCIPAL):
+function BotonSolicitarStock({ product }: { product: any }) {
+  const storageKey = `solicitud_lock_${product.id}`;
+
+  const getRemainingTime = () => {
+    const lockUntil = localStorage.getItem(storageKey);
+    if (!lockUntil) return 0;
+    const remaining = Math.ceil((parseInt(lockUntil) - Date.now()) / 1000);
+    return remaining > 0 ? remaining : 0;
+  };
+
+  const [timeLeft, setTimeLeft] = useState(getRemainingTime());
+
+  useEffect(() => {
+    if (timeLeft <= 0) return;
+    const timer = setInterval(() => {
+      const remaining = getRemainingTime();
+      setTimeLeft(remaining);
+      if (remaining <= 0) {
+        localStorage.removeItem(storageKey);
+        clearInterval(timer);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [timeLeft]);
+
+  const handleSolicitarClick = async () => {
+    if (timeLeft > 0) return;
+
+    const unlockTime = Date.now() + 5 * 60 * 1000;
+    localStorage.setItem(storageKey, unlockTime.toString());
+    setTimeLeft(300);
+
+    try {
+      const token = localStorage.getItem("noslight_token");
+      await fetch(import.meta.env.VITE_API_URL + "/api/store/solicitar-stock", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          product_id: product.id,
+          current_stock: product.stock,
+          package_size: product.minStock
+        })
+      });
+    } catch (error) {
+      console.error("Error al enviar la solicitud:", error);
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
+
+  return (
+    <button
+      onClick={handleSolicitarClick}
+      disabled={timeLeft > 0}
+      className={`inline-flex items-center gap-2 px-3 py-2 text-sm font-bold border transition-all rounded-xl ${timeLeft > 0
+          ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-100"
+          : "text-orange-600 bg-orange-50 border-orange-100 hover:bg-orange-100 opacity-0 group-hover:opacity-100 cursor-pointer"
+        }`}
+      title={timeLeft > 0 ? `Botón bloqueado temporalmente` : "Solicitar reposición al almacén"}
+    >
+      <AlertCircle size={16} />
+      <span>{timeLeft > 0 ? `Bloqueado (${formatTime(timeLeft)})` : "Solicitar"}</span>
+    </button>
+  );
+}
+
 
 export default function StoreStockList() {
   // --- 1. ESTADOS (Memoria de la interfaz) ---
@@ -27,7 +103,7 @@ export default function StoreStockList() {
   const [filterBrand, setFilterBrand] = useState("");
 
 
-  
+
   const [filterModel, setFilterModel] = useState(""); // <-- Para el modelo
   const [filterInStock, setFilterInStock] = useState(false); // <-- Checkbox para ocultar agotados
   const [sortBy, setSortBy] = useState("name-asc"); // <-- Para ordenar la tabla
@@ -68,7 +144,7 @@ export default function StoreStockList() {
   const uniqueAmps = Array.from(new Set(stockData.map((item) => item.amps)))
     .filter((amp) => amp !== "-")
     .sort();
- // Extraemos todos los polos únicos y limpiamos espacios invisibles
+  // Extraemos todos los polos únicos y limpiamos espacios invisibles
   const uniquePoles = Array.from(new Set(stockData.map((item) => String(item.poles || "").trim())))
     .filter((pole) => pole !== "" && pole !== "-" && pole !== "null" && pole !== "undefined")
     .sort();
@@ -78,7 +154,7 @@ export default function StoreStockList() {
     .filter((brand) => brand && brand !== "-")
     .sort();
 
-    // Extraemos los modelos únicos
+  // Extraemos los modelos únicos
   const uniqueModels = Array.from(new Set(stockData.map((item) => String(item.model || "").trim())))
     .filter((model) => model !== "" && model !== "-" && model !== "null" && model !== "undefined")
     .sort();
@@ -97,7 +173,7 @@ export default function StoreStockList() {
     // Búsqueda y Estados
     const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) || item.sku.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = filterStatus === "all" ? true : item.stock <= item.minStock;
-    
+
     // El nuevo filtro: Solo con Stock
     const matchesInStock = filterInStock ? item.stock > 0 : true;
 
@@ -128,8 +204,8 @@ export default function StoreStockList() {
     setFilterAmp("");
     setFilterPole("");
     setFilterBrand("");
-    setFilterModel(""); 
-    setFilterInStock(false); 
+    setFilterModel("");
+    setFilterInStock(false);
     setSortBy("name-asc");
   };
 
@@ -171,32 +247,29 @@ export default function StoreStockList() {
             {/* BOTONES RÁPIDOS */}
             <button
               onClick={() => setFilterStatus("all")}
-              className={`px-4 py-1.5 rounded-full transition-colors ${
-                filterStatus === "all"
-                  ? "bg-gray-800 text-white"
-                  : "bg-white border border-gray-200 hover:bg-gray-100"
-              }`}
+              className={`px-4 py-1.5 rounded-full transition-colors ${filterStatus === "all"
+                ? "bg-gray-800 text-white"
+                : "bg-white border border-gray-200 hover:bg-gray-100"
+                }`}
             >
               Todos
             </button>
             <button
               onClick={() => setFilterStatus("low")}
-              className={`px-4 py-1.5 rounded-full transition-colors ${
-                filterStatus === "low"
-                  ? "bg-orange-500 text-white"
-                  : "bg-orange-50 text-orange-600 border border-orange-100 hover:bg-orange-100"
-              }`}
+              className={`px-4 py-1.5 rounded-full transition-colors ${filterStatus === "low"
+                ? "bg-orange-500 text-white"
+                : "bg-orange-50 text-orange-600 border border-orange-100 hover:bg-orange-100"
+                }`}
             >
               Bajo Stock
             </button>
             {/* NUEVO BOTÓN: OCULTAR AGOTADOS */}
             <button
               onClick={() => setFilterInStock(!filterInStock)}
-              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full transition-colors border ${
-                filterInStock
-                  ? "bg-green-50 text-green-700 border-green-200 font-bold"
-                  : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
-              }`}
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full transition-colors border ${filterInStock
+                ? "bg-green-50 text-green-700 border-green-200 font-bold"
+                : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
+                }`}
             >
               <CheckSquare size={16} className={filterInStock ? "text-green-600" : "text-gray-400"} />
               Solo con stock
@@ -283,14 +356,14 @@ export default function StoreStockList() {
             filterPole !== "" ||
             filterBrand !== ""
           ) && (
-            <button
-              onClick={clearFilters}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-red-500 hover:bg-red-50 rounded-xl transition-colors"
-            >
-              <X size={14} />
-              Limpiar filtros
-            </button>
-          )}
+              <button
+                onClick={clearFilters}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-red-500 hover:bg-red-50 rounded-xl transition-colors"
+              >
+                <X size={14} />
+                Limpiar filtros
+              </button>
+            )}
         </div>
 
         {/* TABLA DE RESULTADOS */}
@@ -368,7 +441,7 @@ export default function StoreStockList() {
                             {status.label}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-right">
+                        {/*<td className="px-6 py-4 text-right">
                           {product.stock <= product.minStock && (
                             <button
                               className="inline-flex items-center gap-2 px-3 py-2 text-sm font-bold text-orange-600 bg-orange-50 rounded-xl hover:bg-orange-100 transition-colors opacity-0 group-hover:opacity-100"
@@ -378,7 +451,15 @@ export default function StoreStockList() {
                               <span>Solicitar</span>
                             </button>
                           )}
+                        </td>*/}
+                        {/* 🟢 REEMPLAZA CON ESTE BLOQUE CORREGIDO SIN EL PREFIJO "React." */}
+                        {/* 🟢 REEMPLAZA TU BLOQUE COMPLETO DE LA CELDA EN LA PÁGINA 9 POR ESTE: */}
+                        <td className="px-6 py-4 text-right">
+                          {product.stock <= product.minStock && (
+                            <BotonSolicitarStock product={product} />
+                          )}
                         </td>
+
                       </tr>
                     );
                   })
