@@ -51,7 +51,6 @@ export const SalesHistoryPage = () => {
   const [isProcessingExchange, setIsProcessingExchange] = useState(false);
 
 
-  const [currentPage, setCurrentPage] = useState(1);
 
 
 
@@ -84,12 +83,12 @@ export const SalesHistoryPage = () => {
 
   // Escucha todos los filtros estables para recargar la tabla desde Laravel
   useEffect(() => {
-    fetchSalesData();
-  }, [page, startDate, endDate, saleType, debouncedSearch, brand, model, amperage, polarity, searchQuery, currentPage]);
+    fetchSalesData(page);
+  }, [page, startDate, endDate, saleType, debouncedSearch, brand, model, amperage, polarity, searchQuery]);
 
 
 
-  const fetchSalesData = async () => {
+  const fetchSalesData = async (pageToFetch = page) => {
     setLoading(true);
     try {
       // 1. Jalamos el token exacto que usa tu sistema para estar logueado
@@ -97,7 +96,7 @@ export const SalesHistoryPage = () => {
 
       // 2. Armamos los parámetros para el paginado y filtros
       const params = new URLSearchParams({
-        page: page.toString(),
+        page: pageToFetch.toString(),
         start_date: startDate,
         end_date: endDate,
         sale_type: saleType,
@@ -110,8 +109,7 @@ export const SalesHistoryPage = () => {
 
       // 3. Hacemos el fetch nativo apuntando directo al puerto 8000 con los headers correctos
       const response = await fetch(// ASÍ DEBE QUEDAR EDITADO:
-        `${import.meta.env.VITE_API_URL}/api/sales?${params.toString()}&page=${currentPage}`
-        , {
+        `${import.meta.env.VITE_API_URL}/api/sales?${params.toString()}`, {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
@@ -136,8 +134,6 @@ export const SalesHistoryPage = () => {
         credit: parseFloat(result.kpis.credit) || 0,
         grandTotal: parseFloat(result.kpis.grandTotal) || 0
       });
-      console.log("caguederyza", result.sales.data);
-
     } catch (error) {
       console.error("❌ Error cargando el historial dinámico:", error);
     } finally {
