@@ -113,7 +113,7 @@ class SaleController extends Controller
                 'customer_id'      => $customerId,
                 'cash_register_id' => null,
                 'total_amount'     => $calculatedTotal,
-                'paid_amount'      => $request->saleType === 'credito' ? 0 : $paidAmount, 
+                'paid_amount'      => $request->saleType === 'credito' ? 0 : $paidAmount,
                 'status'           => $status,
                 'notes'            => $request->saleType === 'credito' ? 'Venta a crédito' : 'Venta al contado',
             ]);
@@ -172,12 +172,13 @@ class SaleController extends Controller
     // =========================================================================
     public function index(\Illuminate\Http\Request $request)
     {
-        $columnaMarca     = 'brand';     
-        $columnaModelo    = 'model';    
-        $columnaAmperaje  = 'amperage';  
-        $columnaPolaridad = 'poles'; 
-        $columnaTotal     = 'total_amount'; 
-        $columnaTipo      = 'status'; 
+
+        $columnaMarca     = 'brand';
+        $columnaModelo    = 'model';
+        $columnaAmperaje  = 'amperage';
+        $columnaPolaridad = 'poles';
+        $columnaTotal     = 'total_amount';
+        $columnaTipo      = 'status';
 
         $query = \App\Models\Sale::with(['customer', 'items.productVariant.product', 'payments']);
 
@@ -242,7 +243,7 @@ class SaleController extends Controller
         $sale->payments_net = $sale->payments->map(function ($p) use (&$vueltoRestante) {
             $amount = (float) $p->amount;
             $destination = $p->payment_destination ?? ($p->payment_method === 'efectivo' ? 'Caja Principal' : 'General');
-            
+
             // Detectamos si es un pago extra por cambio
             $isDifference = strpos(strtoupper($destination), 'DIFERENCIA') !== false;
 
