@@ -108,8 +108,7 @@ export const SalesHistoryPage = () => {
       });
 
       // 3. Hacemos el fetch nativo apuntando directo al puerto 8000 con los headers correctos
-      const response = await fetch(// ASÍ DEBE QUEDAR EDITADO:
-        `${import.meta.env.VITE_API_URL}/api/sales?${params.toString()}`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/sales?${params.toString()}`, {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
@@ -370,7 +369,7 @@ export const SalesHistoryPage = () => {
     setIsSearchingProducts(true);
     try {
       const token = localStorage.getItem("noslight_token");
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/products?search=${query}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/products?search=${query}&only_with_stock=true`, {
         headers: { "Authorization": `Bearer ${token}` }
       });
 

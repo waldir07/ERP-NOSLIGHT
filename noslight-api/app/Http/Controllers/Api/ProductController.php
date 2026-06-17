@@ -10,6 +10,8 @@ use App\Imports\ProductsImport;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Exports\ProductsExport;
 
+
+
 class ProductController extends Controller
 {
 
@@ -30,7 +32,7 @@ class ProductController extends Controller
 
 
 
-        // 2. CORRECCIÓN ULTRA SEGURA: Solo si el frontend envía explícitamente '?paginated=true'
+        {/*--// 2. CORRECCIÓN ULTRA SEGURA: Solo si el frontend envía explícitamente '?paginated=true'
         // Usamos 'has' y validamos texto plano para evitar falsos positivos en otras vistas
         if ($request->has('paginated') && $request->input('paginated') == 'true') {
             $perPage = $request->input('per_page', 10);
@@ -38,7 +40,32 @@ class ProductController extends Controller
         }
 
         // 3. RETROCOMPATIBILIDAD ABSOLUTA: Cualquier otra pantalla (como Auditoría) recibe el array limpio de siempre
-        return response()->json($query->get());
+        return response()->json($query->get());--*/}
+
+        // 2. 🔥 FILTRO DE STOCK EN TIENDA (ID 2) PARA EL MODAL DE CAMBIOS (SIN COMANDO DB)
+        if ($request->input('only_with_stock') === 'true') {
+            // A. Filtramos directo para que NO muestre productos RAW (Materias primas)
+            $query->where('is_raw', 0);
+
+            // B. Validamos el stock real cruzando las tablas de forma limpia y directa
+            $query->whereExists(function ($subQuery) {
+                $subQuery->select('*') // <-- Cambiado por select('*') para eliminar el error de tipo
+                    ->from('stocks')
+                    ->join('product_variants', 'stocks.product_variant_id', '=', 'product_variants.id')
+                    ->whereColumn('product_variants.product_id', 'products.id')
+                    ->where('stocks.warehouse_id', 2) // 2 = Tu almacén real de TIENDA [context]
+                    ->where('stocks.quantity', '>', 0); // Exige stock disponible mayor a cero [context]
+            });
+        }
+
+        // 3. CORRECCIÓN ULTRA SEGURA: Solo si el frontend envía explícitamente '?paginated=true'
+        if ($request->has('paginated') && $request->input('paginated') == 'true') {
+            $perPage = $request->input('per_page', 10);
+            return response()->json($query->paginate($perPage));
+        }
+
+        // 4. RETROCOMPATIBILIDAD ABSOLUTA: Retorna un máximo de 15 registros para optimizar el modal
+        return response()->json($query->take(15)->get());
     }
 
 

@@ -36,12 +36,45 @@ class CashClosureController extends Controller
         $lastClosure = CashClosure::orderBy('id', 'desc')->first();
         $openingBalance = $lastClosure ? $lastClosure->next_day_float : 0.00;
 
-        $cashSales = SalePayment::whereBetween('created_at', [$startOfDay, $endOfDay])->where('payment_method', 'efectivo')->sum('amount') ?? 0;
-        $yapeSales = SalePayment::whereBetween('created_at', [$startOfDay, $endOfDay])->where('payment_method', 'yape')->sum('amount') ?? 0;
-        $transferSales = SalePayment::whereBetween('created_at', [$startOfDay, $endOfDay])->where('payment_method', 'transferencia')->sum('amount') ?? 0;
-        
-        $cashExpenses = Expense::whereBetween('created_at', [$startOfDay, $endOfDay])->where('payment_method', 'efectivo')->sum('amount') ?? 0;
 
+
+        // =================================================================
+        // 🟢 CÁLCULO DE VENTAS NETO (RESTANDO VUELTOS REALES DE HOY)
+        // =================================================================
+
+        // A. Buscamos todas las ventas que se realizaron dentro del rango de hoy
+        $salesTodayIds = \App\Models\Sale::whereBetween('created_at', [$startOfDay, $endOfDay])
+            ->pluck('id');
+
+        // B. Sumamos todos los vueltos reales entregados en caja el día de hoy
+        $totalVueltosHoy = \App\Models\Sale::whereIn('id', $salesTodayIds)
+            ->whereRaw('paid_amount > total_amount')
+            ->selectRaw('SUM(paid_amount - total_amount) as total')
+            ->value('total') ?: 0;
+
+        // C. Sumamos los pagos brutos registrados en efectivo de hoy
+        $rawCashSales = SalePayment::whereBetween('created_at', [$startOfDay, $endOfDay])
+            ->where('payment_method', 'efectivo')
+            ->sum('amount') ?? 0;
+
+        // D. El EFECTIVO REAL NETO que se quedó físicamente en tu gaveta de dinero
+        $cashSales = ($rawCashSales - $totalVueltosHoy) > 0 ? ($rawCashSales - $totalVueltosHoy) : 0;
+
+        // E. Las ventas electrónicas se mantienen igual (Yape y Transferencias no generan vuelto)
+        $yapeSales = SalePayment::whereBetween('created_at', [$startOfDay, $endOfDay])
+            ->where('payment_method', 'yape')
+            ->sum('amount') ?? 0;
+
+        $transferSales = SalePayment::whereBetween('created_at', [$startOfDay, $endOfDay])
+            ->where('payment_method', 'transferencia')
+            ->sum('amount') ?? 0;
+
+        // F. Gastos del día
+        $cashExpenses = Expense::whereBetween('created_at', [$startOfDay, $endOfDay])
+            ->where('payment_method', 'efectivo')
+            ->sum('amount') ?? 0;
+
+        // G. Caja esperada real al céntimo
         $expectedCash = ($openingBalance + $cashSales) - $cashExpenses;
 
         return response()->json([
@@ -73,14 +106,14 @@ class CashClosureController extends Controller
             'observations'    => 'nullable|string|max:1000', // <-- Nueva validación
         ]);
 
-        $todayStr = Carbon::now('America/Lima')->toDateString(); 
+        $todayStr = Carbon::now('America/Lima')->toDateString();
 
-        $alreadyClosed = CashClosure::whereDate('created_at', $todayStr)->exists(); 
+        $alreadyClosed = CashClosure::whereDate('created_at', $todayStr)->exists();
 
         if ($alreadyClosed) {
             return response()->json([
                 'message' => 'La caja de hoy ya fue cerrada.'
-            ], 422); 
+            ], 422);
         }
 
         $discrepancy = $request->actual_cash - $request->expected_cash;
@@ -92,7 +125,7 @@ class CashClosureController extends Controller
             ], 422);
         }
 
-        $nextDayFloat = $request->actual_cash - $request->cash_withdrawn; 
+        $nextDayFloat = $request->actual_cash - $request->cash_withdrawn;
 
         if ($nextDayFloat < 0) {
             return response()->json([
@@ -101,17 +134,17 @@ class CashClosureController extends Controller
         }
 
         $closure = CashClosure::create([
-            'user_id'         => $request->user()->id, 
-            'opening_balance' => $request->opening_balance, 
-            'cash_sales'      => $request->cash_sales, 
-            'yape_sales'      => $request->yape_sales, 
-            'transfer_sales'  => $request->transfer_sales, 
-            'cash_expenses'   => $request->cash_expenses, 
-            'expected_cash'   => $request->expected_cash, 
-            'actual_cash'     => $request->actual_cash, 
-            'discrepancy'     => $discrepancy, 
-            'cash_withdrawn'  => $request->cash_withdrawn, 
-            'next_day_float'  => $nextDayFloat, 
+            'user_id'         => $request->user()->id,
+            'opening_balance' => $request->opening_balance,
+            'cash_sales'      => $request->cash_sales,
+            'yape_sales'      => $request->yape_sales,
+            'transfer_sales'  => $request->transfer_sales,
+            'cash_expenses'   => $request->cash_expenses,
+            'expected_cash'   => $request->expected_cash,
+            'actual_cash'     => $request->actual_cash,
+            'discrepancy'     => $discrepancy,
+            'cash_withdrawn'  => $request->cash_withdrawn,
+            'next_day_float'  => $nextDayFloat,
             'observations'    => $request->observations, // <-- Guardamos en la BD
         ]);
 
