@@ -11,6 +11,9 @@ import {
   History,
   Banknote,
 } from "lucide-react";
+
+import { jsPDF } from "jspdf";
+
 export default function CreditsPage() {
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -538,7 +541,7 @@ export default function CreditsPage() {
     setTimeout(() => document.body.removeChild(iframe), 1000);
   };
 
-  const handlePrintPDFReport = () => {
+  /*const handlePrintPDFReport = () => {
     if (!selectedAccount) return;
 
     const printWindow = window.open("", "_blank");
@@ -701,7 +704,187 @@ export default function CreditsPage() {
 
     printWindow.document.write(pdfHtml);
     printWindow.document.close();
+
+    
+  };*/
+
+    // =========================================================================
+  // 📄 ACCIÓN: GENERAR COMPROBANTE PDF ADMINISTRATIVO EN ESPEJO
+  // =========================================================================
+  const handlePrintPDFReport = () => {
+    if (!selectedAccount) return;
+
+    // 1. Inicializamos jsPDF de forma nativa y segura
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+    // 2. Encabezado Estilizado Corporativo
+    doc.setFillColor(30, 41, 59);
+    doc.rect(0, 0, 210, 40, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(22);
+    doc.text("NOSLIGHT STORE", 15, 18);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text("Soluciones Eléctricas e Industriales", 15, 25);
+    doc.text("Reporte Operativo de Créditos", 15, 30);
+
+    // Recuadro del Estado de Cuenta
+    doc.setFillColor(255, 255, 255);
+    doc.rect(130, 10, 65, 20, "F");
+    doc.setTextColor(30, 41, 59);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("ESTADO DE CUENTA", 135, 17);
+    doc.setTextColor(220, 38, 38);
+    doc.text("SALDO PENDIENTE", 135, 25);
+
+    // Datos del Expediente del Cliente
+    doc.setTextColor(50, 50, 50);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("INFORMACIÓN DEL DEUDOR", 15, 55);
+    doc.text("DETALLES DEL REPORTE", 120, 55);
+
+    doc.setDrawColor(200, 200, 200);
+    doc.line(15, 57, 95, 57);
+    doc.line(120, 57, 195, 57);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.text(`Cliente: ${selectedAccount.name || 'N/A'}`, 15, 64);
+    doc.text(`DNI/RUC: ${selectedAccount.document_number || 'N/A'}`, 15, 70);
+
+    doc.text(`Fecha Consulta: ${new Date().toLocaleDateString('es-PE')}`, 120, 64);
+    doc.text(`Estado Legal: CRÉDITO ACTIVO`, 120, 70);
+
+    // Tabla de Movimientos (Historial de Despachos y Abonos)
+    let currentY = 85; 
+    doc.setFillColor(240, 242, 245);
+    doc.rect(15, currentY, 180, 8, "F");
+    doc.setFont("helvetica", "bold");
+    doc.text("Fecha Operación", 17, currentY + 6);
+    doc.text("Descripción / Detalle de Productos", 55, currentY + 6);
+    doc.text("Importe (S/)", 190, currentY + 6, { align: "right" });
+
+    // Aire para evitar el encabalgamiento inicial
+    currentY = 96; 
+
+    const allMovements = selectedAccount.history
+      ? selectedAccount.history.flatMap((day: any) =>
+          day.movements.map((mov: any) => ({ ...mov, date: day.date }))
+        )
+      : [];
+
+    doc.setFont("helvetica", "normal");
+    
+    if (allMovements.length === 0) {
+      doc.text("No se registran movimientos en este periodo.", 17, currentY + 5);
+      doc.line(15, currentY + 8, 195, currentY + 8);
+    } else {
+      allMovements.forEach((mov: any) => {
+        if (currentY > 260) {
+          doc.addPage();
+          currentY = 20; 
+          
+          doc.setFillColor(240, 242, 245);
+          doc.rect(15, currentY, 180, 8, "F");
+          doc.setFont("helvetica", "bold");
+          doc.text("Fecha Operación", 17, currentY + 6);
+          doc.text("Descripción / Detalle de Productos", 55, currentY + 6);
+          doc.text("Importe (S/)", 190, currentY + 6, { align: "right" });
+          doc.setFont("helvetica", "normal");
+          currentY += 12;
+        }
+
+        let dateString = mov.date + "T00:00:00";
+        if (mov.full_date) {
+          dateString = mov.full_date;
+        } else if (mov.time) {
+          dateString = mov.date + "T" + mov.time + ":00";
+        }
+        
+        const dateObj = new Date(dateString);
+        const formattedDate = dateObj.toLocaleDateString("es-PE", { day: "numeric", month: "short" });
+        
+        const formattedTime = dateObj.toLocaleTimeString("es-PE", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true
+        }).toLowerCase().replace("am", "a. m.").replace("pm", "p. m.");
+
+        if (mov.is_payment) {
+          doc.setFont("helvetica", "bold");
+          doc.text(formattedDate, 17, currentY + 5);
+          
+          doc.setFontSize(8);
+          doc.setFont("helvetica", "normal");
+          doc.text(` ${formattedTime}`, 17, currentY + 9);
+          doc.setFontSize(10);
+          
+          doc.setFont("helvetica", "bold");
+          doc.text(`ABONO REGISTRADO (${mov.method?.toUpperCase() || 'EFECTIVO'})`, 55, currentY + 5);
+          doc.text(`-S/ ${parseFloat(mov.amount).toFixed(2)}`, 190, currentY + 5, { align: "right" });
+          currentY += 14; 
+        } else {
+          doc.setFont("helvetica", "normal");
+          doc.text(formattedDate, 17, currentY + 5);
+          
+          doc.setFontSize(8);
+          doc.text(` ${formattedTime}`, 17, currentY + 9);
+          doc.setFontSize(10);
+
+          doc.text(mov.description || 'Despacho de Mercadería', 55, currentY + 5);
+          doc.text(`S/ ${parseFloat(mov.amount).toFixed(2)}`, 190, currentY + 5, { align: "right" });
+          currentY += 12;
+
+          if (mov.details && mov.details.length > 0) {
+            mov.details.forEach((d: any) => {
+              if (currentY > 270) {
+                doc.addPage();
+                currentY = 20;
+              }
+              const prodName = d.product_variant?.product?.name || "Producto general";
+              doc.setFontSize(9);
+              doc.setTextColor(110, 110, 110);
+              doc.text(`  • ${d.quantity} und. x ${prodName} (S/ ${parseFloat(d.unit_price).toFixed(2)} c/u)`, 55, currentY + 1);
+              doc.setTextColor(50, 50, 50);
+              doc.setFontSize(10);
+              currentY += 6;
+            });
+            currentY += 4; 
+          }
+        }
+
+        doc.setDrawColor(226, 232, 240);
+        doc.line(15, currentY, 195, currentY);
+        currentY += 6; 
+      });
+    }
+
+    // Total General Alineado Correctamente
+    currentY += 15;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(71, 85, 105); 
+    doc.text("TOTAL PENDIENTE DE PAGO:", 15, currentY); 
+
+    doc.setFontSize(16);
+    doc.setTextColor(185, 28, 28); 
+    doc.text(`S/ ${parseFloat(selectedAccount.credit_balance || 0).toFixed(2)}`, 195, currentY, { align: "right" });
+
+    // Pie de página
+    currentY += 15;
+    doc.setTextColor(120, 120, 120);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text("Este extracto representa un balance oficial de despachos y aportes financieros del cliente.", 15, currentY);
+
+    // Descarga Directa
+    const clienteLimpio = selectedAccount.name.replace(/\s+/g, '_');
+    doc.save(`Estado_de_Cuenta_${clienteLimpio}.pdf`);
   };
+
   
 
   // Filtros de búsqueda inteligentes
