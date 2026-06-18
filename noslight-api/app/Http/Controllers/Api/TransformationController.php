@@ -54,7 +54,7 @@ class TransformationController extends Controller
 
             // --- B. BUSCAR Y SUMAR AL TERMINADO EN TIENDA ---
             // Buscamos si el producto terminado ya tiene su variante, si no, la creamos usando TU código exacto
-           $finishedVariant = ProductVariant::firstOrCreate(
+            $finishedVariant = ProductVariant::firstOrCreate(
                 ['product_id' => $finishedProduct->id],
                 [
                     'sku' => $finishedProduct->base_code,
@@ -113,7 +113,7 @@ class TransformationController extends Controller
      * Obtener posibles transformaciones para un producto Raw específico
      * Ejemplo: GET /api/transformations/possible?raw_product_id=4&raw_amperage=60
      */
-    public function possible(Request $request)
+    /*public function possible(Request $request)
     {
         $request->validate([
             'raw_product_id' => 'required|exists:products,id',
@@ -140,6 +140,56 @@ class TransformationController extends Controller
                 'conversion_rate' => (float) $pivot->conversion_rate,
                 'extra_cost' => (float) $pivot->extra_cost,
                 'notes' => $pivot->notes,
+            ];
+        });
+
+        return response()->json([
+            'raw_product' => [
+                'id' => $rawProduct->id,
+                'name' => $rawProduct->name,
+                'base_code' => $rawProduct->base_code,
+                'is_raw' => $rawProduct->is_raw,
+            ],
+            'raw_amperage' => (int) $request->raw_amperage,
+            'possible_finished' => $possible,
+            'total_possible' => $possible->count(),
+        ]);
+    }*/
+
+    /**
+     * Obtener posibles transformaciones para un producto Raw específico (LIBERADO)
+     * Muestra el catálogo completo de productos terminados para libre configuración
+     */
+    public function possible(Request $request)
+    {
+        // 🔥 TRUCO DE AUDITORÍA: Forzamos la muerte de la API para ver si pasa por aquí
+        dd("¡ALERTA! LARAVEL SÍ ESTÁ LEYENDO ESTE ARCHIVO CORRECTAMENTE");
+
+        $request->validate([
+            'raw_product_id' => 'required|exists:products,id',
+            'raw_amperage'   => 'required|integer|min:1',
+        ]);
+
+        $rawProduct = Product::findOrFail($request->raw_product_id);
+
+        // 🔥 LIBERACIÓN ABSOLUTA: Trae el 100% de productos terminados del sistema
+        // No le importa el stock, ni el almacén, ni restringe por el amperaje del pivote.
+        $allFinishedProducts = Product::where('is_raw', 0)
+            ->orderBy('name', 'asc')
+            ->get();
+
+        // Formateamos la respuesta en espejo idéntica a lo que espera tu Frontend (React)
+        // para que no rompa ninguna propiedad ni etiqueta visual de la lista
+        $possible = $allFinishedProducts->map(function ($finishedProduct) {
+            return [
+                'id' => $finishedProduct->id, // Mapea directo al ID para el combobox
+                'finished_product_id' => $finishedProduct->id,
+                'finished_product_name' => $finishedProduct->name,
+                'finished_amperage' => $finishedProduct->amperage ?? 0,
+                'sku' => $finishedProduct->base_code,
+                'conversion_rate' => 1.0, // Valores por defecto estables
+                'extra_cost' => 0.0,
+                'notes' => null,
             ];
         });
 

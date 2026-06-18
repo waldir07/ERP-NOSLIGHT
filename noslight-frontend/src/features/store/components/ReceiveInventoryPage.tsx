@@ -247,19 +247,31 @@ export default function ReceiveInventoryPage() {
         items: itemsPayload,
       };
 
-      console.log("🚀 PAYLOAD REAL ENVIADO:", payload);
-
-      
-
-      toast.success("Ingreso procesado correctamente");
+       // 2. Desactivamos el modal EN EL ACTO de forma visual.
+      // Esto hace que la ventana se destruya instantáneamente ante los ojos del usuario,
+      // eliminando la sensación de congelamiento mientras internet procesa los datos.
       setVerifyingTransfer(null);
       setNote("");
-      fetchPending(); // Recargamos la lista
+
+      console.log("🚀 PAYLOAD REAL ENVIADO:", payload);
+
+      // 🔥 CONEXIÓN AXIOS CON EL BACKEND: Llamamos a tu método php receiveTransfer
+      const res = await axios.post(`/api/transfers/${verifyingTransfer.id}/receive`, payload);
+      
+      if (res.status === 200 || res.status === 201) {
+        // Si el backend procesó el incremento de stock y el estado completed con éxito
+        toast.success("✅ ¡Ingreso guardado y stock actualizado en tienda!");
+        
+        fetchPending(); // Ahora sí refrescará las tarjetas a color verde
+      }
+
     } catch (error: any) {
-      console.error("Error detallado:", error.response?.data);
-      toast.error("Error al procesar el ingreso");
-    } finally {
-      setLoading(false);
+     console.error("❌ Error detallado al procesar ingreso:", error.response?.data);
+      toast.error(
+        error.response?.data?.message || "Error al procesar el ingreso en el almacén"
+      );
+      // Si la API rebota por un error real de servidor, volvemos a abrir el modal de auxilio
+      fetchPending();
     }
   };
 

@@ -16,7 +16,7 @@ class ProductController extends Controller
 {
 
 
-    public function index(Request $request)
+   /*  public function index(Request $request)
     {
         $query = Product::query();
 
@@ -40,12 +40,32 @@ class ProductController extends Controller
         }
 
         // 3. RETROCOMPATIBILIDAD ABSOLUTA: Cualquier otra pantalla (como Auditoría) recibe el array limpio de siempre
-        return response()->json($query->get());--*/}
+        return response()->json($query->get());-- este estaba comentado
 
         // 2. 🔥 FILTRO DE STOCK EN TIENDA (ID 2) PARA EL MODAL DE CAMBIOS (SIN COMANDO DB)
         if ($request->input('only_with_stock') === 'true') {
             // A. Filtramos directo para que NO muestre productos RAW (Materias primas)
             $query->where('is_raw', 0);
+
+            // B. Si la consulta viene ESPECÍFICAMENTE del modal de cambios, exigimos stock > 0
+            if ($request->input('for_exchange') === 'true') {
+                $query->whereExists(function ($subQuery) {
+                    $subQuery->select('*')
+                        ->from('stocks')
+                        ->join('product_variants', 'stocks.product_variant_id', '=', 'product_variants.id')
+                        ->whereColumn('product_variants.product_id', 'products.id')
+                        ->where('stocks.warehouse_id', 2) // Almacén de TIENDA
+                        ->where('stocks.quantity', '>', 0); // Exige stock disponible para el cambio
+                });
+            } else {
+                // Si viene del modal de transformaciones o configuraciones generales,
+                // solo exigimos que el producto exista en el catálogo de tienda, sin importar si su cantidad es 0.
+                $query->whereExists(function ($subQuery) {
+                    $subQuery->select('*')
+                        ->from('product_variants')
+                        ->whereColumn('product_variants.product_id', 'products.id');
+                });
+            }
 
             // B. Validamos el stock real cruzando las tablas de forma limpia y directa
             $query->whereExists(function ($subQuery) {
@@ -66,6 +86,45 @@ class ProductController extends Controller
 
         // 4. RETROCOMPATIBILIDAD ABSOLUTA: Retorna un máximo de 15 registros para optimizar el modal
         return response()->json($query->take(15)->get());
+    } */
+
+
+    public function index(Request $request)
+    {
+        $query = Product::query();
+
+        // 1. Lógica de búsqueda original intacta
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function($q) use ($search) {
+                $q->where('name', 'LIKE', '%' . $search . '%')
+                  ->orWhere('base_code', 'LIKE', '%' . $search . '%')
+                  ->orWhere('brand', 'LIKE', '%' . $search . '%');
+            });
+        }
+
+        // 2. FILTRO DE SEGURIDAD EXCLUSIVO: Solo se activa si la petición viene del modal de cambios
+        // Si viene de transformaciones o de cualquier otra pantalla, Laravel ignora esto por completo
+        if ($request->input('for_exchange') === 'true') {
+            $query->where('is_raw', 0);
+            $query->whereExists(function ($subQuery) {
+                $subQuery->select('*')
+                    ->from('stocks')
+                    ->join('product_variants', 'stocks.product_variant_id', '=', 'product_variants.id')
+                    ->whereColumn('product_variants.product_id', 'products.id')
+                    ->where('stocks.warehouse_id', 2)
+                    ->where('stocks.quantity', '>', 0);
+            });
+        }
+
+        // 3. Retrocompatibilidad absoluta original
+        if ($request->has('paginated') && $request->input('paginated') == 'true') {
+            $perPage = $request->input('per_page', 10);
+            return response()->json($query->paginate($perPage));
+        }
+
+        // 4. Retorna el catálogo limpio de siempre
+        return response()->json($query->get());
     }
 
 
