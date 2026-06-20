@@ -13,6 +13,9 @@ import {
 } from "lucide-react";
 
 import { jsPDF } from "jspdf";
+// CORRECCIÓN DE LA LÍNEA 16: Importa tu Axios configurado localmente
+import axios from "../../../lib/axios";
+
 
 export default function CreditsPage() {
 
@@ -80,7 +83,7 @@ export default function CreditsPage() {
     openAccountStatement(selectedAccount, start, end); // Vuelve a pedir el mes actual
   };
 
-  
+
   const [isLoadingStatement, setIsLoadingStatement] = useState(false);
 
   const toggleDay = (date: string) => {
@@ -88,6 +91,8 @@ export default function CreditsPage() {
       prev.includes(date) ? prev.filter((d) => d !== date) : [...prev, date],
     );
   };
+
+
 
   // NUEVO: Estados para pagos múltiples
   // Estado para pagos múltiples + vuelto
@@ -131,6 +136,35 @@ export default function CreditsPage() {
       setIsLoadingAccounts(false);
     }
   };
+
+
+  // 🟢 CLONADO IDÉNTICO DE ESTADOS DE LA PASARELA DE VENTAS
+  const [yapeAccounts, setYapeAccounts] = useState<string[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<string[]>([]);
+
+
+
+  // 🟢 EFECTO DE CARGA OFICIAL DESDE /API/SETTINGS
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const token = localStorage.getItem("noslight_token");
+        const res = await fetch(import.meta.env.VITE_API_URL + "/api/settings", {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          // Sincronizamos las listas vivas que tu jefa configuró en el administrador
+          setYapeAccounts(data.yape_accounts || []);
+          setBankAccounts(data.bank_accounts || []);
+        }
+      } catch (error) {
+        console.error("Error al cargar configuraciones de pago en créditos:", error);
+      }
+    };
+    fetchSettings();
+  }, []);
+
 
 
   // 3. EL USEEFFECT (Exactamente como me mostraste en tu última captura)
@@ -708,7 +742,7 @@ export default function CreditsPage() {
     
   };*/
 
-    // =========================================================================
+  // =========================================================================
   // 📄 ACCIÓN: GENERAR COMPROBANTE PDF ADMINISTRATIVO EN ESPEJO
   // =========================================================================
   const handlePrintPDFReport = () => {
@@ -759,7 +793,7 @@ export default function CreditsPage() {
     doc.text(`Estado Legal: CRÉDITO ACTIVO`, 120, 70);
 
     // Tabla de Movimientos (Historial de Despachos y Abonos)
-    let currentY = 85; 
+    let currentY = 85;
     doc.setFillColor(240, 242, 245);
     doc.rect(15, currentY, 180, 8, "F");
     doc.setFont("helvetica", "bold");
@@ -768,16 +802,16 @@ export default function CreditsPage() {
     doc.text("Importe (S/)", 190, currentY + 6, { align: "right" });
 
     // Aire para evitar el encabalgamiento inicial
-    currentY = 96; 
+    currentY = 96;
 
     const allMovements = selectedAccount.history
       ? selectedAccount.history.flatMap((day: any) =>
-          day.movements.map((mov: any) => ({ ...mov, date: day.date }))
-        )
+        day.movements.map((mov: any) => ({ ...mov, date: day.date }))
+      )
       : [];
 
     doc.setFont("helvetica", "normal");
-    
+
     if (allMovements.length === 0) {
       doc.text("No se registran movimientos en este periodo.", 17, currentY + 5);
       doc.line(15, currentY + 8, 195, currentY + 8);
@@ -785,8 +819,8 @@ export default function CreditsPage() {
       allMovements.forEach((mov: any) => {
         if (currentY > 260) {
           doc.addPage();
-          currentY = 20; 
-          
+          currentY = 20;
+
           doc.setFillColor(240, 242, 245);
           doc.rect(15, currentY, 180, 8, "F");
           doc.setFont("helvetica", "bold");
@@ -803,10 +837,10 @@ export default function CreditsPage() {
         } else if (mov.time) {
           dateString = mov.date + "T" + mov.time + ":00";
         }
-        
+
         const dateObj = new Date(dateString);
         const formattedDate = dateObj.toLocaleDateString("es-PE", { day: "numeric", month: "short" });
-        
+
         const formattedTime = dateObj.toLocaleTimeString("es-PE", {
           hour: "2-digit",
           minute: "2-digit",
@@ -816,20 +850,20 @@ export default function CreditsPage() {
         if (mov.is_payment) {
           doc.setFont("helvetica", "bold");
           doc.text(formattedDate, 17, currentY + 5);
-          
+
           doc.setFontSize(8);
           doc.setFont("helvetica", "normal");
           doc.text(` ${formattedTime}`, 17, currentY + 9);
           doc.setFontSize(10);
-          
+
           doc.setFont("helvetica", "bold");
           doc.text(`ABONO REGISTRADO (${mov.method?.toUpperCase() || 'EFECTIVO'})`, 55, currentY + 5);
           doc.text(`-S/ ${parseFloat(mov.amount).toFixed(2)}`, 190, currentY + 5, { align: "right" });
-          currentY += 14; 
+          currentY += 14;
         } else {
           doc.setFont("helvetica", "normal");
           doc.text(formattedDate, 17, currentY + 5);
-          
+
           doc.setFontSize(8);
           doc.text(` ${formattedTime}`, 17, currentY + 9);
           doc.setFontSize(10);
@@ -852,13 +886,13 @@ export default function CreditsPage() {
               doc.setFontSize(10);
               currentY += 6;
             });
-            currentY += 4; 
+            currentY += 4;
           }
         }
 
         doc.setDrawColor(226, 232, 240);
         doc.line(15, currentY, 195, currentY);
-        currentY += 6; 
+        currentY += 6;
       });
     }
 
@@ -866,11 +900,11 @@ export default function CreditsPage() {
     currentY += 15;
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
-    doc.setTextColor(71, 85, 105); 
-    doc.text("TOTAL PENDIENTE DE PAGO:", 15, currentY); 
+    doc.setTextColor(71, 85, 105);
+    doc.text("TOTAL PENDIENTE DE PAGO:", 15, currentY);
 
     doc.setFontSize(16);
-    doc.setTextColor(185, 28, 28); 
+    doc.setTextColor(185, 28, 28);
     doc.text(`S/ ${parseFloat(selectedAccount.credit_balance || 0).toFixed(2)}`, 195, currentY, { align: "right" });
 
     // Pie de página
@@ -885,7 +919,7 @@ export default function CreditsPage() {
     doc.save(`Estado_de_Cuenta_${clienteLimpio}.pdf`);
   };
 
-  
+
 
   // Filtros de búsqueda inteligentes
   const filteredPending = pendingSales.filter((group) => {
@@ -1308,7 +1342,9 @@ export default function CreditsPage() {
                     </div>
                   </div>
 
-                  {/* Métodos de pago - más compactos */}
+
+
+                  {/* Métodos de pago - 100% DINÁMICOS EN ESPEJO CON LA VENTA */}
                   <div className="space-y-4">
                     {payments.map((payment, index) => (
                       <div
@@ -1344,13 +1380,11 @@ export default function CreditsPage() {
                                   e.target.value,
                                 )
                               }
-                              className="w-full border border-gray-300 rounded-2xl py-3 px-4 text-base"
+                              className="w-full border border-gray-300 rounded-2xl py-3 px-4 text-base bg-white"
                             >
                               <option value="efectivo">💵 Efectivo</option>
                               <option value="yape">📱 Yape / Plin</option>
-                              <option value="transferencia">
-                                🏦 Transferencia
-                              </option>
+                              <option value="transferencia">🏦 Transferencia</option>
                             </select>
                           </div>
 
@@ -1380,7 +1414,7 @@ export default function CreditsPage() {
                             </div>
                           </div>
 
-                          {/* Campos según método */}
+                          {/* 📱 Selector dinámico de Yapes en espejo con la venta */}
                           {payment.method === "yape" && (
                             <div className="md:col-span-5">
                               <label className="block text-xs font-bold text-gray-600 mb-1">
@@ -1395,19 +1429,19 @@ export default function CreditsPage() {
                                     e.target.value,
                                   )
                                 }
-                                className="w-full border border-gray-300 rounded-2xl py-3 px-4 text-base"
+                                className="w-full border border-gray-300 rounded-2xl py-3 px-4 text-base bg-white"
                               >
                                 <option value="">Seleccionar cuenta...</option>
-                                <option value="yape_principal">
-                                  Yape Principal (+51 999 123 456)
-                                </option>
-                                <option value="yape_secundaria">
-                                  Yape Secundaria (+51 987 654 321)
-                                </option>
+                                {yapeAccounts.map((opt) => (
+                                  <option key={opt} value={opt}>
+                                    {opt}
+                                  </option>
+                                ))}
                               </select>
                             </div>
                           )}
 
+                          {/* 🏦 Selector dinámico de Transferencias en espejo con la venta */}
                           {payment.method === "transferencia" && (
                             <div className="md:col-span-5">
                               <label className="block text-xs font-bold text-gray-600 mb-1">
@@ -1422,13 +1456,14 @@ export default function CreditsPage() {
                                     e.target.value,
                                   )
                                 }
-                                className="w-full border border-gray-300 rounded-2xl py-3 px-4 text-base"
+                                className="w-full border border-gray-300 rounded-2xl py-3 px-4 text-base bg-white"
                               >
                                 <option value="">Seleccionar cuenta...</option>
-                                <option value="bcp_principal">
-                                  BCP - Principal
-                                </option>
-                                <option value="interbank">Interbank</option>
+                                {bankAccounts.map((opt) => (
+                                  <option key={opt} value={opt}>
+                                    {opt}
+                                  </option>
+                                ))}
                               </select>
                             </div>
                           )}
@@ -1436,6 +1471,11 @@ export default function CreditsPage() {
                       </div>
                     ))}
                   </div>
+
+
+
+
+
 
                   <button
                     onClick={addPaymentLine}
@@ -1702,7 +1742,7 @@ export default function CreditsPage() {
                 <div className="flex flex-col items-center p-8">
                   <div className="bg-white w-full max-w-md border-2 border-dashed border-gray-300 p-6 rounded-xl shadow-inner font-mono text-sm">
                     <h3 className="font-black text-lg mb-1 uppercase text-center text-gray-900">
-                      Proforma de Cobro
+                      Proforma de Cob ro
                     </h3>
                     <p className="text-center font-bold text-gray-700">Cliente: {selectedAccount.name}</p>
                     <p className="text-center text-xs text-gray-400">Fecha consulta: {new Date().toLocaleDateString()}</p>

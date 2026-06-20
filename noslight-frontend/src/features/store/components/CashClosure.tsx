@@ -10,6 +10,7 @@ interface CashClosureSummary {
     transfer_sales?: number;
     cash_expenses?: number;
     expected_cash?: number;
+    credit_payments?: Array<{ id: number; customer: string; amount: number; method: string; time: string; }>;   
     closure_details?: {
         opening_balance: number | string;
         cash_sales: number | string;
@@ -47,7 +48,7 @@ export default function CashClosure() {
     const [saving, setSaving] = useState<boolean>(false);
     const [message, setMessage] = useState<string>("");
     const [error, setError] = useState<string>("");
-    
+
     // 🟢 NUEVO ESTADO PARA AUTO-IMPRESIÓN
     const [shouldAutoPrint, setShouldAutoPrint] = useState<boolean>(false);
 
@@ -146,7 +147,7 @@ export default function CashClosure() {
             return;
         }
 
-       
+
 
         // =================================================================
         // 🟢 NUEVA VALIDACIÓN: Obligar observación si hay descuadre
@@ -331,11 +332,11 @@ export default function CashClosure() {
                 <span>${formatMoney(details.discrepancy)}</span>
             </div>
             <div class="alert-box">
-                ${Number(details.discrepancy) < 0 
-                    ? '⚠️ FALTANTE DE EFECTIVO' 
-                    : Number(details.discrepancy) > 0 
-                        ? '⭐ SOBRANTE DE EFECTIVO' 
-                        : '✅ CAJA COMPLETAMENTE CUADRADA'}
+                ${Number(details.discrepancy) < 0
+                ? '⚠️ FALTANTE DE EFECTIVO'
+                : Number(details.discrepancy) > 0
+                    ? '⭐ SOBRANTE DE EFECTIVO'
+                    : '✅ CAJA COMPLETAMENTE CUADRADA'}
             </div>
 
             <div class="divider"></div>
@@ -441,7 +442,7 @@ export default function CashClosure() {
         );
     }
 
-    
+
     return (
         <div className="max-w-5xl mx-auto p-6">
             <div className="mb-6">
@@ -503,6 +504,29 @@ export default function CashClosure() {
                 <p className="text-sm text-gray-500 mt-3">
                     Fórmula: fondo inicial + ventas en efectivo - gastos en efectivo.
                 </p>
+
+                {/* 🧾 PANEL DE AUDITORÍA VISUAL: INGRESOS POR COBRANZA DE CRÉDITOS */}
+                {summary?.credit_payments && summary.credit_payments.length > 0 && (
+                    <div className="mt-4 bg-green-50 border border-green-200 rounded-lg p-4">
+                        <div className="flex items-center gap-2 pb-2 mb-2 border-b border-green-200">
+                            <span className="text-base">💰</span>
+                            <h3 className="text-xs font-bold text-green-950 uppercase tracking-wider">
+                                Cobranzas de Créditos (Hoy)
+                            </h3>
+                        </div>
+                        <div className="divide-y divide-green-100 max-h-40 overflow-y-auto">
+                            {summary.credit_payments.map((payment: any) => (
+                                <div key={payment.id} className="flex items-center justify-between py-2 text-xs">
+                                    <div className="flex flex-col">
+                                        <span className="font-semibold text-gray-800">{payment.customer}</span>
+                                        <span className="text-[10px] text-gray-400">🕒 {payment.time} hrs — <span className="uppercase">{payment.method}</span></span>
+                                    </div>
+                                    <span className="font-bold text-green-700">+ {formatMoney(payment.amount)}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
             </div>
 
             <form
