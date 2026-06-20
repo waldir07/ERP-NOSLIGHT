@@ -212,16 +212,18 @@ class CreditController extends Controller
                 }
             }
 
-            // 4. Guardamos los recibos del pago (Por si pagó mitad efectivo, mitad yape)
+            // 4. Guardamos los recibos del pago en su tabla natural de créditos de forma transparente
             foreach ($request->payments as $paymentData) {
                 \App\Models\CreditPayment::create([
-                    'customer_id' => $customer->id,
-                    'user_id' => $request->user()->id,
-                    'amount' => $paymentData['amount'],
-                    'payment_method' => $paymentData['method'],
-                    'payment_date' => now(),
+                    'customer_id'    => $customer->id,
+                    'user_id'        => $request->user()->id,
+                    'amount'         => $paymentData['amount'],
+                    'payment_method' => $paymentData['method'], // efectivo, yape o transferencia
+                    'payment_date'   => now(),
                 ]);
             }
+
+
 
             return response()->json([
                 'message' => 'Abono en cascada registrado correctamente.',
@@ -244,9 +246,9 @@ class CreditController extends Controller
             ->whereBetween('created_at', [$startDate . ' 00:00:00', $endDate . ' 23:59:59'])
             ->with('items.productVariant.product')
             ->get()
-            ->map(function($item) {
+            ->map(function ($item) {
                 return [
-                    'id' => 'sale_'.$item->id,
+                    'id' => 'sale_' . $item->id,
                     'date' => $item->created_at->format('Y-m-d'),
                     'time' => $item->created_at->format('H:i'),
                     'full_date' => $item->created_at,
@@ -263,9 +265,9 @@ class CreditController extends Controller
             ->with('user')
             ->whereBetween('created_at', [$startDate . ' 00:00:00', $endDate . ' 23:59:59']) // 👈 ¡ESTA ES LA LÍNEA QUE FALTABA!
             ->get()
-            ->map(function($item) {
+            ->map(function ($item) {
                 return [
-                    'id' => 'pay_'.$item->id,
+                    'id' => 'pay_' . $item->id,
                     'date' => $item->created_at->format('Y-m-d'),
                     'time' => $item->created_at->format('H:i'),
                     'full_date' => $item->created_at,

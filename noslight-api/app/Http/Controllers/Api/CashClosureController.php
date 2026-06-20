@@ -69,23 +69,58 @@ class CashClosureController extends Controller
             ->where('payment_method', 'transferencia')
             ->sum('amount') ?? 0;
 
+        // =================================================================
+        // 🧾 3. AUDITORÍA EN VIVO DE ABONOS DE CRÉDITO COBRADOS HOY
+        // =================================================================
+        // Cargamos la relación con el modelo Customer para leer el nombre en la auditoría visual
+        $creditPaymentsToday = \App\Models\CreditPayment::with('customer')
+            ->whereBetween('payment_date', [$startOfDay, $endOfDay])
+            ->get();
+
+        // Calculamos los subtotales de dinero real que ingresó estrictamente de cobranzas de deuda hoy
+        $cashCredits = (float) $creditPaymentsToday->where('payment_method', 'efectivo')->sum('amount');
+        $yapeCredits = (float) $creditPaymentsToday->where('payment_method', 'yape')->sum('amount');
+        $transferCredits = (float) $creditPaymentsToday->where('payment_method', 'transferencia')->sum('amount');
+
+        // =================================================================
+        // 💰 4. UNIFICACIÓN DE CAJA TOTAL (VENTAS + ABONOS DE CRÉDITO)
+        // =================================================================
+        $cashSalesTotal = $cashSales + $cashCredits;
+        $yapeSalesTotal = $yapeSales + $yapeCredits;
+        $transferSalesTotal = $transferSales + $transferCredits;
+
+
         // F. Gastos del día
         $cashExpenses = Expense::whereBetween('created_at', [$startOfDay, $endOfDay])
             ->where('payment_method', 'efectivo')
             ->sum('amount') ?? 0;
 
         // G. Caja esperada real al céntimo
-        $expectedCash = ($openingBalance + $cashSales) - $cashExpenses;
+        $expectedCash = ($openingBalance + $cashSalesTotal) - $cashExpenses;
 
         return response()->json([
             'is_closed'       => false, // <-- Bandera de que aún está abierta
             'opening_balance' => (float) $openingBalance,
             'cash_sales'      => (float) $cashSales,
-            'yape_sales'      => (float) $yapeSales,
-            'transfer_sales'  => (float) $transferSales,
+            'yape_sales'      => (float) $yapeSalesTotal,
+            'transfer_sales'  => (float) $transferSalesTotal,
             'cash_expenses'   => (float) $cashExpenses,
             'expected_cash'   => (float) $expectedCash,
-            'date'            => $todayStr
+            'date'            => $todayStr,
+
+             // 🔥 REGISTRO DE AUDITORÍA VISUAL DESGLOSADO PARA LA TIENDA
+            'credit_payments' => $creditPaymentsToday->map(function($p) {
+                return [
+                    'id'       => $p->id,
+                    'customer' => $p->customer->name ?? 'Cliente General',
+                    'amount'   => (float) $p->amount,
+                    'method'   => $p->payment_method,
+                    'time'     => $p->created_at ? $p->created_at->format('H:i') : '00:00'
+                ];
+            })
+
+
+
         ])->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
     }
 
