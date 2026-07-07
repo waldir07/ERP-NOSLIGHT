@@ -10,7 +10,7 @@ class Credit extends Model
     use HasFactory;
 
     protected $fillable = [
-        'sale_id', 'client_id', 'total_amount', 'paid_amount',
+        'sale_id', 'customer_id', 'total_amount', 'paid_amount',
         'remaining_amount', 'due_date', 'status', 'notes'
     ];
 

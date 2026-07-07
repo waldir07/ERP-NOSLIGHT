@@ -135,7 +135,7 @@ class SaleController extends Controller
                 ]);
             }
 
-           // Registrar los Pagos Individuales
+            // Registrar los Pagos Individuales
             if ($request->payments && $request->saleType === 'contado') {
                 foreach ($request->payments as $payment) {
                     $sale->payments()->create([
@@ -163,7 +163,6 @@ class SaleController extends Controller
                 'message' => 'Venta registrada exitosamente',
                 'receipt' => $sale->load(['items.productVariant.product', 'payments']),
             ], 201);
-
         }); // <-- Aquí se cierra correctamente la transacción de la línea 41
     } // <-- Aquí cierra la función store()
 
@@ -184,11 +183,11 @@ class SaleController extends Controller
 
         if ($request->filled('search')) {
             $search = $request->search;
-            $query->where(function($q) use ($search) {
+            $query->where(function ($q) use ($search) {
                 $q->where('receipt_number', 'like', '%' . $search . '%')
-                  ->orWhereHas('customer', function($element) use ($search) {
-                      $element->where('name', 'like', '%' . $search . '%');
-                  });
+                    ->orWhereHas('customer', function ($element) use ($search) {
+                        $element->where('name', 'like', '%' . $search . '%');
+                    });
             });
         }
         if ($request->filled('start_date') && $request->filled('end_date')) {
@@ -199,92 +198,136 @@ class SaleController extends Controller
         }
         if ($request->filled('brand')) {
             $brand = $request->brand;
-            $query->whereHas('items.productVariant.product', function($q) use ($brand, $columnaMarca) { $q->where($columnaMarca, 'like', '%' . $brand . '%'); });
+            $query->whereHas('items.productVariant.product', function ($q) use ($brand, $columnaMarca) {
+                $q->where($columnaMarca, 'like', '%' . $brand . '%');
+            });
         }
         if ($request->filled('model')) {
             $model = $request->model;
-            $query->whereHas('items.productVariant.product', function($q) use ($model, $columnaModelo) { $q->where($columnaModelo, 'like', '%' . $model . '%'); });
+            $query->whereHas('items.productVariant.product', function ($q) use ($model, $columnaModelo) {
+                $q->where($columnaModelo, 'like', '%' . $model . '%');
+            });
         }
         if ($request->filled('amperage')) {
             $amperage = $request->amperage;
-            $query->whereHas('items.productVariant.product', function($q) use ($amperage, $columnaAmperaje) { $q->where($columnaAmperaje, 'like', '%' . $amperage . '%'); });
+            $query->whereHas('items.productVariant.product', function ($q) use ($amperage, $columnaAmperaje) {
+                $q->where($columnaAmperaje, 'like', '%' . $amperage . '%');
+            });
         }
         if ($request->filled('polarity')) {
             $polarity = $request->polarity;
-            $query->whereHas('items.productVariant.product', function($q) use ($polarity, $columnaPolaridad) { $q->where($columnaPolaridad, 'like', '%' . $polarity . '%'); });
+            $query->whereHas('items.productVariant.product', function ($q) use ($polarity, $columnaPolaridad) {
+                $q->where($columnaPolaridad, 'like', '%' . $polarity . '%');
+            });
         }
 
-        // KPIs Con Rebaja de Vueltos
+                // =========================================================================
+        // 🟢 NUEVOS KPIs PURIFICADOS (Alineados con tu visión de negocio)
+        // =========================================================================
         $clonedQuery = clone $query;
         $salesIds = $clonedQuery->pluck('id');
 
+        // 1. Vueltos totales de las operaciones nativas de hoy
         $totalVueltosEntregados = \App\Models\Sale::whereIn('id', $salesIds)
             ->whereRaw('paid_amount > total_amount')
             ->selectRaw('SUM(paid_amount - total_amount) as total')
             ->value('total') ?: 0;
 
-        $creditTotal = \App\Models\Sale::whereIn('id', $salesIds)->where($columnaTipo, '!=', 'paid')->sum($columnaTotal) ?: 0;
-        $rawCash = \App\Models\SalePayment::whereIn('sale_id', $salesIds)->where('payment_method', 'efectivo')->sum('amount') ?: 0;
+        // 2. Créditos que acaban de NACER el día de hoy (Siguen pendientes de pago)
+        $creditTotal = \App\Models\Sale::whereIn('id', $salesIds)
+            ->where($columnaTipo, '!=', 'paid')
+            ->sum($columnaTotal) ?: 0;
+
+        // 3. Ventas puras en EFECTIVO de operaciones que nacieron y se pagaron al contado hoy
+        // Excluimos cualquier registro huérfano de abonos que use la tabla general
+        $rawCash = \App\Models\SalePayment::whereIn('sale_id', $salesIds)
+            ->where('payment_method', 'efectivo')
+            ->where('payment_destination', 'not like', '%COBRANZA%')
+            ->where('payment_destination', 'not like', '%LOTE%')
+            ->where('payment_destination', 'not like', '%ABONO%')
+            ->sum('amount') ?: 0;
         $cashTotal = ($rawCash - $totalVueltosEntregados) > 0 ? ($rawCash - $totalVueltosEntregados) : 0;
-        $electronicTotal = \App\Models\SalePayment::whereIn('sale_id', $salesIds)->where('payment_method', '!=', 'efectivo')->sum('amount') ?: 0;
-        $grandTotal = \App\Models\Sale::whereIn('id', $salesIds)->sum($columnaTotal) ?: 0;
+
+        // 4. Ventas puras DIGITALES de operaciones al contado de hoy
+        $electronicTotal = \App\Models\SalePayment::whereIn('sale_id', $salesIds)
+            ->where('payment_method', '!=', 'efectivo')
+            ->where('payment_destination', 'not like', '%COBRANZA%')
+            ->where('payment_destination', 'not like', '%LOTE%')
+            ->where('payment_destination', 'not like', '%ABONO%')
+            ->sum('amount') ?: 0;
+
+        // 5. CAJA TOTAL BRUTA REAL (Solo lo recaudado por operaciones genuinas de hoy)
+        // Evitamos sumar las ventas de créditos del pasado que fueron pagadas hoy
+        $grandTotal = $cashTotal + $electronicTotal;
+
+        // 6. FILTRO DE VISTA: Ocultamos del listado diario las ventas antiguas que se pagaron hoy por lote
+        // 🔥 DEFINIMOS LA VARIABLE QUE FALTABA:
+        $todayStr = \Carbon\Carbon::now('America/Lima')->toDateString();
+
+        $query->where(function($q) use ($todayStr) {
+            $q->whereDate('created_at', $todayStr)
+              ->orWhere(function($sub) {
+                  $sub->where('status', '!=', 'paid');
+              });
+        });
 
         $paginatedSales = $query->orderBy('id', 'desc')->paginate(10);
 
+
         $paginatedSales->getCollection()->transform(function ($sale) {
-        $sale->totalAmount = (float) $sale->total_amount;
-        $esCredito = ($sale->status !== 'paid') || (strpos(strtolower($sale->notes), 'credito') !== false);
-        $sale->saleType = $esCredito ? 'credito' : 'contado';
-        $sale->vueltoReal = $sale->paid_amount > $sale->total_amount ? (float)($sale->paid_amount - $sale->total_amount) : 0;
+            $sale->totalAmount = (float) $sale->total_amount;
+            $esCredito = ($sale->status !== 'paid') || (strpos(strtolower($sale->notes), 'credito') !== false);
+            $sale->saleType = $esCredito ? 'credito' : 'contado';
+            $sale->vueltoReal = $sale->paid_amount > $sale->total_amount ? (float)($sale->paid_amount - $sale->total_amount) : 0;
 
-        // ====================== NUEVO: CÁLCULO NETO INTELIGENTE ======================
-        $vueltoRestante = $sale->vueltoReal;
+            // ====================== NUEVO: CÁLCULO NETO INTELIGENTE ======================
+            $vueltoRestante = $sale->vueltoReal;
 
-        $sale->payments_net = $sale->payments->map(function ($p) use (&$vueltoRestante) {
-            $amount = (float) $p->amount;
-            $destination = $p->payment_destination ?? ($p->payment_method === 'efectivo' ? 'Caja Principal' : 'General');
+            $sale->payments_net = $sale->payments->map(function ($p) use (&$vueltoRestante) {
+                $amount = (float) $p->amount;
+                $destination = $p->payment_destination ?? ($p->payment_method === 'efectivo' ? 'Caja Principal' : 'General');
 
-            // Detectamos si es un pago extra por cambio
-            $isDifference = strpos(strtoupper($destination), 'DIFERENCIA') !== false;
+                // Detectamos si es un pago extra por cambio
+                $isDifference = strpos(strtoupper($destination), 'DIFERENCIA') !== false;
 
-            // Al efectivo original le restamos el vuelto para sacar el "neto" real de esa operación
-            if ($p->payment_method === 'efectivo' && !$isDifference && $vueltoRestante > 0) {
-                if ($amount >= $vueltoRestante) {
-                    $amount -= $vueltoRestante;
-                    $vueltoRestante = 0;
-                } else {
-                    $vueltoRestante -= $amount;
-                    $amount = 0;
+                // Al efectivo original le restamos el vuelto para sacar el "neto" real de esa operación
+                if ($p->payment_method === 'efectivo' && !$isDifference && $vueltoRestante > 0) {
+                    if ($amount >= $vueltoRestante) {
+                        $amount -= $vueltoRestante;
+                        $vueltoRestante = 0;
+                    } else {
+                        $vueltoRestante -= $amount;
+                        $amount = 0;
+                    }
+                }
+
+                return [
+                    'method'      => $p->payment_method,
+                    'destination' => $destination,
+                    'amount'      => $amount,
+                    'is_difference' => $isDifference
+                ];
+            })->filter(function ($p) {
+                return $p['amount'] > 0; // Ocultamos la fila si el vuelto la dejó en cero
+            })->values();
+
+            // Mantenemos payments_mapped original para otros usos
+            $sale->payments_mapped = $sale->payments->map(function ($p) {
+                return [
+                    'method'      => $p->payment_method,
+                    'destination' => $p->payment_destination ?? 'General',
+                    'amount'      => (float) $p->amount
+                ];
+            });
+
+            if ($sale->items) {
+                foreach ($sale->items as $item) {
+                    $item->name  = $item->productVariant->product->name ?? 'Producto SKU: ' . ($item->productVariant->sku ?? '');
+                    $item->price = (float) $item->unit_price;
                 }
             }
-
-            return [
-                'method'      => $p->payment_method,
-                'destination' => $destination,
-                'amount'      => $amount,
-                'is_difference' => $isDifference
-            ];
-        })->filter(function($p) {
-            return $p['amount'] > 0; // Ocultamos la fila si el vuelto la dejó en cero
-        })->values();
-
-        // Mantenemos payments_mapped original para otros usos
-        $sale->payments_mapped = $sale->payments->map(function ($p) {
-            return [
-                'method'      => $p->payment_method,
-                'destination' => $p->payment_destination ?? 'General',
-                'amount'      => (float) $p->amount
-            ];
+            return $sale;
         });
-
-        if ($sale->items) {
-            foreach ($sale->items as $item) {
-                $item->name  = $item->productVariant->product->name ?? 'Producto SKU: ' . ($item->productVariant->sku ?? '');
-                $item->price = (float) $item->unit_price;
-            }
-        }
-        return $sale;
-    });
 
         return response()->json([
             'sales' => $paginatedSales,

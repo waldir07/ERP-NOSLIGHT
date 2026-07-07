@@ -8,9 +8,12 @@ interface CashClosureSummary {
     cash_sales?: number;
     yape_sales?: number;
     transfer_sales?: number;
+    cash_credits?: number;        // 🆕 Agregado
+    yape_credits?: number;        // 🆕 Agregado
+    transfer_credits?: number;    // 🆕 Agregado
     cash_expenses?: number;
     expected_cash?: number;
-    credit_payments?: Array<{ id: number; customer: string; amount: number; method: string; time: string; }>;   
+    credit_payments?: Array<{ id: number; customer: string; amount: number; method: string; time: string; }>;
     closure_details?: {
         opening_balance: number | string;
         cash_sales: number | string;
@@ -464,7 +467,7 @@ export default function CashClosure() {
                 </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                 <SummaryCard
                     title="Fondo inicial"
                     value={formatMoney(summary.opening_balance || 0)}
@@ -485,6 +488,19 @@ export default function CashClosure() {
                     title="Ventas Transferencia"
                     value={formatMoney(summary.transfer_sales || 0)}
                 />
+
+                <SummaryCard
+                    title="Créditos cobrados (Efectivo)"
+                    value={formatMoney(summary.cash_credits || 0)}
+                />
+                <SummaryCard
+                    title="Créditos cobrados (Yape)"
+                    value={formatMoney(summary.yape_credits || 0)}
+                />
+                <SummaryCard
+                    title="Créditos cobrados (Transf.)"
+                    value={formatMoney(summary.transfer_credits || 0)}
+                />
             </div>
 
             <div className="bg-white rounded-xl shadow border border-gray-200 p-6 mb-6">
@@ -501,8 +517,9 @@ export default function CashClosure() {
                     </span>
                 </div>
 
+                {/* 🆕 FÓRMULA ACTUALIZADA TEXTUALMENTE */}
                 <p className="text-sm text-gray-500 mt-3">
-                    Fórmula: fondo inicial + ventas en efectivo - gastos en efectivo.
+                    Fórmula: fondo inicial + ventas en efectivo + créditos cobrados en efectivo - gastos en efectivo.
                 </p>
 
                 {/* 🧾 PANEL DE AUDITORÍA VISUAL: INGRESOS POR COBRANZA DE CRÉDITOS */}

@@ -58,10 +58,18 @@ export const SalesHistoryPage = () => {
   const [exchangePaymentDestination, setExchangePaymentDestination] = useState('Caja Principal');
 
   const filtrarHoy = () => {
-    const hoy = new Date().toISOString().split('T')[0];
+    const localDate = new Date();
+    const year = localDate.getFullYear();
+
+    // Obtenemos el mes y día del navegador garantizando los dos dígitos (01, 02... 12)
+    const month = String(localDate.getMonth() + 1).padStart(2, '0');
+    const day = String(localDate.getDate()).padStart(2, '0');
+
+    const hoy = `${year}-${month}-${day}`; // Devuelve siempre '2026-06-25' puro en Perú
+
     setStartDate(hoy);
     setEndDate(hoy);
-    setPage(1); // <-- Número puro, sin comillas
+    setPage(1);
   };
 
   const filtrarAyer = () => {

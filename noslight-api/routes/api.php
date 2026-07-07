@@ -145,6 +145,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
     //momentaneo para inyección
     Route::post('/admin/inventory/bulk-inject', [InventoryAdjustmentController::class, 'bulkAdminInject']);
+
+
+    Route::get('/credits/vales/{saleId}/payments', [\App\Http\Controllers\Api\CreditController::class, 'getValePayments']);
+
+
 });
 //inyeccion de excel
 

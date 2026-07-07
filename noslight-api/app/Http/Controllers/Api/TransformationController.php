@@ -17,81 +17,79 @@ use App\Models\StockMovement;
 class TransformationController extends Controller
 {
     public function store(Request $request)
-    {
-        // 1. Validación estricta: exigimos los IDs exactos de tu catálogo
-        $request->validate([
-            'raw_product_id' => 'required|exists:products,id',
-            'finished_product_id' => 'required|exists:products,id',
-            'quantity' => 'required|integer|min:1',
-            'notes' => 'nullable|string|max:500',
+{
+    // 1. Validación estricta
+    $request->validate([
+        'raw_product_id' => 'required|exists:products,id',
+        'finished_product_id' => 'required|exists:products,id',
+        'quantity' => 'required|integer|min:1',
+        'notes' => 'nullable|string|max:500',
+    ]);
+
+    $rawProduct = Product::findOrFail($request->raw_product_id);
+    $finishedProduct = Product::findOrFail($request->finished_product_id);
+
+    // 2. Único almacén necesario: PRINCIPAL (El limbo/tránsito donde se procesa la transformación)
+    $principal = Warehouse::where('code', 'PRINCIPAL')->first() ?? Warehouse::first();
+
+    return DB::transaction(function () use ($request, $rawProduct, $finishedProduct, $principal) {
+
+        // --- A. BUSCAR Y DESCONTAR DEL RAW EN ALMACÉN PRINCIPAL ---
+        $rawVariant = ProductVariant::where('product_id', $rawProduct->id)->first();
+
+        if (!$rawVariant) {
+            throw ValidationException::withMessages(['general' => 'El producto RAW seleccionado no tiene stock inicializado.']);
+        }
+
+        $rawStock = Stock::where('product_variant_id', $rawVariant->id)
+            ->where('warehouse_id', $principal->id)
+            ->lockForUpdate() // Evita problemas de concurrencia
+            ->first();
+
+        if (!$rawStock || $rawStock->quantity < $request->quantity) {
+            throw ValidationException::withMessages(['quantity' => 'Stock RAW insuficiente en el Almacén Principal.']);
+        }
+
+        $rawStock->decrement('quantity', $request->quantity);
+
+        // --- B. BUSCAR Y SUMAR AL TERMINADO EN EL MISMO ALMACÉN (LIMBO) ---
+        $finishedVariant = ProductVariant::firstOrCreate(
+            ['product_id' => $finishedProduct->id],
+            [
+                'sku' => $finishedProduct->base_code,
+                'amperage' => 0,
+                'is_finished' => true,
+            ]
+        );
+
+        $finishedStock = Stock::firstOrCreate(
+            [
+                'product_variant_id' => $finishedVariant->id,
+                'warehouse_id' => $principal->id, // Guardado estrictamente en Almacén
+            ],
+            ['quantity' => 0, 'is_raw' => 0]
+        );
+
+        $finishedStock->increment('quantity', $request->quantity);
+
+        // --- C. GUARDAR EL HISTORIAL DE LA OPERACIÓN ---
+        // Ejecuta la inserción directa sin declarar variables opacas
+        Transformation::create([
+            'product_id' => $rawProduct->id,
+            'raw_amperage' => 0,
+            'finished_amperage' => 0,
+            'quantity' => $request->quantity,
+            'user_id' => auth()->id(),
+            'warehouse_id' => $principal->id,
+            'notes' => $request->notes,
         ]);
 
-        $rawProduct = Product::findOrFail($request->raw_product_id);
-        $finishedProduct = Product::findOrFail($request->finished_product_id);
-
-        // 2. Almacenes dinámicos
-        $principal = Warehouse::where('code', 'PRINCIPAL')->first() ?? Warehouse::first();
-        $tienda = Warehouse::where('code', 'TIENDA')->first() ?? $principal;
-
-        return DB::transaction(function () use ($request, $rawProduct, $finishedProduct, $principal, $tienda) {
-
-            // --- A. BUSCAR Y DESCONTAR DEL RAW EN ALMACÉN PRINCIPAL ---
-            $rawVariant = ProductVariant::where('product_id', $rawProduct->id)->first();
-
-            if (!$rawVariant) {
-                throw ValidationException::withMessages(['general' => 'El producto RAW seleccionado no tiene stock inicializado.']);
-            }
-
-            $rawStock = Stock::where('product_variant_id', $rawVariant->id)
-                ->where('warehouse_id', $principal->id)
-                ->first();
-
-            if (!$rawStock || $rawStock->quantity < $request->quantity) {
-                throw ValidationException::withMessages(['quantity' => 'Stock RAW insuficiente en el Almacén Principal.']);
-            }
-
-            $rawStock->decrement('quantity', $request->quantity);
-
-            // --- B. BUSCAR Y SUMAR AL TERMINADO EN TIENDA ---
-            // Buscamos si el producto terminado ya tiene su variante, si no, la creamos usando TU código exacto
-            $finishedVariant = ProductVariant::firstOrCreate(
-                ['product_id' => $finishedProduct->id],
-                [
-                    'sku' => $finishedProduct->base_code,
-                    'amperage' => 0,
-                    'is_finished' => true,
-                ]
-            );
-
-            $finishedStock = Stock::firstOrCreate(
-                [
-                    'product_variant_id' => $finishedVariant->id,
-                    'warehouse_id' => $principal->id, // <--- ¡CAMBIADO A PRINCIPAL!
-                ],
-                ['quantity' => 0, 'is_raw' => 0]
-            );
-
-            $finishedStock->increment('quantity', $request->quantity);
-
-            // --- C. GUARDAR EL HISTORIAL DE LA OPERACIÓN ---
-            // (Mantenemos raw_amperage y finished_amperage en 0 para no romper tu base de datos actual)
-            $transformation = Transformation::create([
-                'product_id' => $rawProduct->id,
-                'raw_amperage' => 0,
-                'finished_amperage' => 0,
-                'quantity' => $request->quantity,
-                'user_id' => auth()->id(),
-                'warehouse_id' => $principal->id,
-                'notes' => $request->notes,
-            ]);
-
-            return response()->json([
-                'message' => 'Transformación registrada exitosamente usando tu catálogo.',
-                'stock_raw_remaining' => $rawStock->fresh()->quantity,
-            ], 201);
-        });
-    }
-
+        return response()->json([
+            'message' => 'Transformación registrada exitosamente en el Almacén de origen.',
+            'stock_raw_remaining' => $rawStock->fresh()->quantity,
+        ], 201);
+    });
+}
     /**
      * Listar todas las transformaciones (historial)
      */

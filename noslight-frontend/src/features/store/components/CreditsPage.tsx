@@ -13,8 +13,12 @@ import {
 } from "lucide-react";
 
 import { jsPDF } from "jspdf";
-// CORRECCIÓN DE LA LÍNEA 16: Importa tu Axios configurado localmente
-import axios from "../../../lib/axios";
+
+
+
+
+import { ValePaymentsExpress } from "./ValePaymentsExpress";
+
 
 
 export default function CreditsPage() {
@@ -41,12 +45,17 @@ export default function CreditsPage() {
   // 1. EL CANDADO DEFINITIVO (Leyendo el JSON de noslight_user)
   const userStr = localStorage.getItem("noslight_user");
   const userObj = userStr ? JSON.parse(userStr) : null;
-  const isAdmin = userObj?.role?.toUpperCase() === "ADMIN";
+  // 1.1 BLINDAJE DE ROL (Busca en memoria, y si no está, jala del almacenamiento persistente)
+  const storedUser = JSON.parse(localStorage.getItem("user") || sessionStorage.getItem("user") || "{}");
 
   // 2. ESTADO INICIAL
-  const [activeTab, setActiveTab] = useState<"pendientes" | "cuentas">(
-    isAdmin ? "pendientes" : "cuentas"
-  );
+  // 🟢 CORRECCIÓN DE TIPADO: Agregamos "abono" como una pestaña oficial y permitida
+  const [activeTab, setActiveTab] = useState<"pendientes" | "cuentas" | "abono">("cuentas");
+
+  // Estado caché para saber qué tarjeta del historial está expandida visualmente
+  const [expandedLoteId, setExpandedLoteId] = useState<string | null>(null);
+
+
 
   // Le agregamos "cobranza" a la lista de permitidos
   const [accountTab, setAccountTab] = useState<
@@ -86,11 +95,21 @@ export default function CreditsPage() {
 
   const [isLoadingStatement, setIsLoadingStatement] = useState(false);
 
+  const [selectedSaleIds, setSelectedSaleIds] = useState<number[]>([]);
+  const [totalToPay, setTotalToPay] = useState<number>(0);
+
+  // 🟢 ESTADOS DE CONTROL PARA LA COBRANZA QUIRÚRGICA POR DOCUMENTO
+  const [selectedGroupCodes, setSelectedGroupCodes] = useState<string[]>([]);
+  const [activeDetailCode, setActiveDetailCode] = useState<string | null>(null);
+
+
   const toggleDay = (date: string) => {
     setExpandedDays((prev) =>
       prev.includes(date) ? prev.filter((d) => d !== date) : [...prev, date],
     );
   };
+
+
 
 
 
@@ -129,7 +148,14 @@ export default function CreditsPage() {
       const res = await fetch(import.meta.env.VITE_API_URL + "/api/credits/accounts", {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.ok) setAccounts(await res.json());
+      if (res.ok) {
+        // 🟢 EXTRAEMOS EL CONTENIDO REAL EN UNA VARIABLE LIMPIA
+        const data = await res.json();
+        setAccounts(data);
+
+        // Imprimimos la data general de cuentas para auditar las propiedades
+        console.log("MIRA AQUÍ LAS CUENTAS CARGADAS:", data);
+      }
     } catch (error) {
       console.error("Error al cargar cuentas", error);
     } finally {
@@ -141,6 +167,10 @@ export default function CreditsPage() {
   // 🟢 CLONADO IDÉNTICO DE ESTADOS DE LA PASARELA DE VENTAS
   const [yapeAccounts, setYapeAccounts] = useState<string[]>([]);
   const [bankAccounts, setBankAccounts] = useState<string[]>([]);
+
+
+  const [activeValePayments, setActiveValePayments] = useState<any[]>([]);
+
 
 
 
@@ -167,11 +197,15 @@ export default function CreditsPage() {
 
 
 
-  // 3. EL USEEFFECT (Exactamente como me mostraste en tu última captura)
+  // 🟢 COMPORTAMIENTO CONFIGURADO CORRECTAMENTE (SIN BUCLES INFINITOS)
   useEffect(() => {
-    if (activeTab === "pendientes" && isAdmin) fetchPendingSales();
-    if (activeTab === "cuentas") fetchAccounts();
-  }, [activeTab]);
+    // Eliminamos el freno de !isAdmin para que cargue con cualquier rol
+    if (activeTab === "pendientes") {
+      fetchPendingSales();
+    } else if (activeTab === "cuentas") {
+      fetchAccounts();
+    }
+  }, [activeTab]); // Quitamos isAdmin de las dependencias ya que no limita la carga
 
   // Modal de Aprobación
   // Abre el modal cargando todos los productos del día
@@ -259,7 +293,7 @@ export default function CreditsPage() {
     }
   };
 
-  // Función actualizada para registrar el abono, abrir gaveta e imprimir opcionalmente
+  // Función actualizada para registrar el abono por lotes, abrir gaveta e imprimir opcionalmente
   const handleAddPayment = async (action: "print" | "no-print" = "print") => {
     const totalPaid = payments.reduce(
       (sum, p) => sum + (parseFloat(p.amount) || 0),
@@ -268,11 +302,31 @@ export default function CreditsPage() {
 
     if (totalPaid <= 0) return alert("Ingresa al menos un monto válido.");
 
-    if (totalPaid > parseFloat(selectedAccount.credit_balance)) {
+    // 🟢 1. EXTRACCIÓN QUIRÚRGICA: Sacamos los IDs reales de los vales de los lotes marcados arriba
+    const finalSaleIds: number[] = [];
+    let aggregatedPendingDebt = 0;
+
+    selectedAccount?.sales?.forEach((sale: any) => {
+      const code = sale.notes && sale.notes.startsWith('LOTE-VALORIZADO-') ? sale.notes : `DIRECTO-${sale.id}`;
+      // Si el operario tiene marcado este lote, acumulamos su saldo y guardamos sus IDs
+      if (selectedGroupCodes.includes(code)) {
+        finalSaleIds.push(sale.id);
+        // Evitamos sumar si el backend ya lo marca como pagado
+        if (sale.status !== 'paid') {
+          aggregatedPendingDebt += parseFloat(sale.pending_balance);
+        }
+      }
+    });
+
+    if (finalSaleIds.length === 0) {
+      return alert("Por favor, selecciona al menos un lote de cobro del carrusel superior.");
+    }
+
+    // 🟢 2. VALIDACIÓN FLEXIBLE: Validamos contra los papeles marcados, no contra la cuenta ciega macro
+    if (totalPaid > aggregatedPendingDebt) {
       return alert(
-        "El abono no puede ser mayor a la deuda total (S/ " +
-        selectedAccount.credit_balance +
-        ").",
+        "El abono de S/ " + totalPaid.toFixed(2) + " supera el saldo pendiente de los lotes seleccionados (S/ " +
+        aggregatedPendingDebt.toFixed(2) + ")."
       );
     }
 
@@ -285,13 +339,20 @@ export default function CreditsPage() {
         bank_account: p.bank_account || null,
       }));
 
-    // 🟢 DETECTAMOS SI HAY EFECTIVO EN ALGUNA DE LAS LÍNEAS DE PAGO
+    // DETECTAMOS SI HAY EFECTIVO EN ALGUNA DE LAS LÍNEAS DE PAGO
     const hasEfectivo = validPayments.some((p) => p.method === "efectivo");
 
     setIsProcessingPayment(true);
 
     try {
       const token = localStorage.getItem("noslight_token");
+
+      // 📦 3. CONSTRUCCIÓN DEL PAQUETE UNIFICADO PARA TU ENDPOINT
+      const payload = {
+        sale_ids: finalSaleIds, // Envia los vales que componen las tarjetas marcadas en el slider
+        payments: validPayments
+      };
+
       const res = await fetch(
         `${import.meta.env.VITE_API_URL}/api/credits/customers/${selectedAccount.id}/payments`,
         {
@@ -301,7 +362,8 @@ export default function CreditsPage() {
             Accept: "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ payments: validPayments }),
+          // 🔥 AQUÍ CONECTAMOS EL PAYLOAD COMPLETO QUE LA API EXIGE
+          body: JSON.stringify(payload),
         },
       );
 
@@ -321,9 +383,11 @@ export default function CreditsPage() {
           printAbonoTicket(validPayments, totalPaid);
         }
 
-        alert("¡Abono registrado con éxito!");
+        alert("¡Abono registrado con éxito en los lotes seleccionados!");
 
-        // Limpiar todo y cerrar modal
+        // Limpiar todo, reiniciar estados del carrusel y cerrar modal lateral
+        setSelectedGroupCodes([]);
+        setActiveDetailCode(null);
         setSelectedAccount(null);
         setPayments([{ id: "1", method: "efectivo", amount: "" }]);
         fetchAccounts();
@@ -378,6 +442,13 @@ export default function CreditsPage() {
     start = startDate,
     end = endDate,
   ) => {
+
+    // 🔒 CANDADO DE RED: Si el modal ya está abierto gestionando a este mismo cliente 
+    // y el historial ya tiene datos cargados, bloqueamos las peticiones repetitivas de red
+    if (selectedAccount?.id === account.id && selectedAccount?.history?.length > 0 && start === startDate && end === endDate) {
+      return;
+    }
+
     setSelectedAccount(account);
     if (!selectedAccount || selectedAccount.id !== account.id) {
       setAccountTab("abono");
@@ -395,10 +466,25 @@ export default function CreditsPage() {
 
       if (res.ok) {
         const fullData = await res.json();
+
+        // 🟢 CANDADO ANTI-CRUCE DE CLIENTES (Solución al Bug 3):
+        // Si el servidor responde una petición rezagada de un cliente diferente al que el usuario
+        // tiene actualmente seleccionado en su pantalla, abortamos la actualización para evitar saltos locos.
+        if (fullData.customer?.id !== account.id) {
+          console.warn(" Petición rezagada detectada y bloqueada de forma segura.");
+          return;
+        }
+
         setSelectedAccount((prev: any) => ({
           ...prev,
+          // 🟢 Hidratamos el objeto completo que viene del servidor incluyendo sus ventas reales
+          ...(fullData.customer || {}),
+          paid_lotes: fullData.paid_lotes || [],
+          metrics: fullData.metrics || null,
           history: fullData.history || [],
-          credit_balance: fullData.current_balance || prev?.credit_balance,
+          credit_balance: fullData.current_balance !== undefined ? fullData.current_balance : prev?.credit_balance,
+          // 🔥 Aseguramos que jale las ventas unificadas para el carrusel superior
+          sales: fullData.customer?.sales || prev?.sales || []
         }));
       }
     } catch (error) {
@@ -932,6 +1018,380 @@ export default function CreditsPage() {
     account.name.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
+
+  // 🟢 ACORDEÓN CONSOLIDADO CON DESGLOSE COMPLETO DE FECHAS Y HORAS
+  const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>({});
+
+  const renderCollectionDocuments = (account: any) => {
+    const groups: Record<string, any[]> = {};
+
+    // Agrupamos en vivo los tickets que comparten el mismo código de cobro en las notas
+    account?.sales?.forEach((sale: any) => {
+      const code = sale.notes && sale.notes.startsWith('DOC-COBRO-') ? sale.notes : `INDIVIDUAL-${sale.id}`;
+      if (!groups[code]) groups[code] = [];
+      groups[code].push(sale);
+    });
+
+    const groupKeys = Object.keys(groups);
+
+    if (groupKeys.length === 0) {
+      return (
+        <p className="text-xs text-gray-400 font-medium text-center py-2">
+          Sin documentos de cobro activos en este expediente.
+        </p>
+      );
+    }
+
+    const isExpanded = expandedAccounts[account.id] || false;
+
+    return (
+      <div className="mt-2 bg-gray-50 border border-gray-200 rounded-2xl p-3">
+        {/* Botón conmutador para desplegar u ocultar el desglose y ahorrar pantalla */}
+        <button
+          type="button"
+          onClick={() => setExpandedAccounts(prev => ({ ...prev, [account.id]: !isExpanded }))}
+          className="w-full flex items-center justify-between text-left text-xs font-black text-gray-600 uppercase tracking-wider hover:text-gray-900 transition-colors"
+        >
+          <span className="flex items-center gap-1.5">
+            🧾 {groupKeys.length} {groupKeys.length === 1 ? 'Documento' : 'Documentos'} de Cobro Cerrados
+          </span>
+          <span className="text-xs font-bold text-blue-600 font-mono">
+            {isExpanded ? "▲ Ocultar" : "▼ Ver Desglose"}
+          </span>
+        </button>
+
+        {/* CONTENEDOR DESPLEGABLE */}
+        {isExpanded && (
+          <div className="mt-3 space-y-3 max-h-60 overflow-y-auto pt-2 border-t border-dashed border-gray-200">
+            {groupKeys.map((groupCode) => {
+              const salesInGroup = groups[groupCode];
+
+              // Sumamos los montos de todo el lote valorizado junto
+              const totalAmount = salesInGroup.reduce((acc, s) => acc + parseFloat(s.total_amount), 0);
+              const pendingBalance = salesInGroup.reduce((acc, s) => acc + parseFloat(s.pending_balance), 0);
+              const isPaid = pendingBalance <= 0;
+
+              return (
+                <div
+                  key={groupCode}
+                  className="p-3 rounded-xl border flex flex-col gap-2.5 bg-white shadow-sm border-gray-100"
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <span className="font-black text-gray-900 text-xs block tracking-wide">
+                        {groupCode.startsWith('INDIVIDUAL-') ? 'Comprobante Directo' : groupCode}
+                      </span>
+                      <span className="text-[10px] text-gray-400 font-bold">
+                        🗂️ Consolidado de {salesInGroup.length} vales aprobados juntos
+                      </span>
+                    </div>
+                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-wider ${isPaid ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
+                      }`}>
+                      {isPaid ? "Cancelado" : "Pendiente"}
+                    </span>
+                  </div>
+
+                  {/* 🟢 EL DESGLOSE DE PRODUCTOS CON HORA Y FECHA EXACTA */}
+                  <div className="bg-gray-50/50 rounded-xl p-2.5 border border-gray-100 space-y-2">
+                    <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">
+                      Productos Incluidos en este Documento:
+                    </p>
+                    {salesInGroup.map((sale: any) => {
+                      const saleDate = new Date(sale.created_at);
+                      const formattedTime = saleDate.toLocaleTimeString("es-PE", { hour: '2-digit', minute: '2-digit', hour12: false });
+                      const formattedDate = saleDate.toLocaleDateString("es-PE", { day: 'numeric', month: 'short' });
+
+                      return (
+                        <div key={sale.id} className="pl-2 border-l-2 border-blue-400 space-y-0.5">
+                          <span className="text-[9px] font-bold text-gray-400 uppercase block">
+                            🕒 Retirado el {formattedDate} a las {formattedTime} hrs (Vale: {sale.receipt_number})
+                          </span>
+                          {sale.items?.map((it: any) => (
+                            <p key={it.id} className="text-[11px] text-gray-600 font-medium pl-1">
+                              • {it.quantity} und. x {it.product_variant?.product?.name || "Artículo"} — <span className="font-semibold text-gray-700">S/ {parseFloat(it.unit_price).toFixed(2)}</span>
+                            </p>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Balance de Saldos del Lote */}
+                  <div className="flex items-center justify-between border-t border-gray-100 pt-2.5 mt-0.5">
+                    <div>
+                      <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">
+                        {isPaid ? "Total Liquidado" : "Saldo Pendiente de este Lote"}
+                      </p>
+                      <p className={`text-sm font-black ${isPaid ? "text-green-600" : "text-red-600"}`}>
+                        S/ {isPaid ? totalAmount.toFixed(2) : pendingBalance.toFixed(2)}
+                      </p>
+                    </div>
+
+                    {isPaid ? (
+                      <span className="text-[10px] font-bold text-green-700 bg-green-50 px-3 py-1.5 rounded-xl border border-green-200">
+                        Liquidado Conforme
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        // 🟢 CONEXIÓN NATIVA COMPATIBLE:
+                        // Abre la pestaña oficial de cobranza inyectándole el cliente actual.
+                        // El cajero podrá usar tus métodos mixtos y bancos dinámicos sin restricciones.
+                        onClick={() => openAccountStatement(account)}
+                        className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold px-3 py-1.5 rounded-xl shadow-sm transition-colors"
+                      >
+                        Abonar Lote
+                      </button>
+                    )}
+                  </div>
+
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+
+  // 🟢 EXTRACCIÓN QUIRÚRGICA: Mapeamos los códigos del slider para sacar los IDs reales de los vales
+  const finalSaleIds: number[] = [];
+  selectedAccount?.sales?.forEach((sale: any) => {
+    // Usamos exactamente la misma lógica de agrupación que tiene tu slider visual
+    const code = sale.notes && sale.notes.startsWith('LOTE-VALORIZADO-') ? sale.notes : `DIRECTO-${sale.id}`;
+
+    // Si el operario tiene seleccionada esta tarjeta, inyectamos el vale a la cascada de pago
+    if (selectedGroupCodes.includes(code)) {
+      finalSaleIds.push(sale.id);
+    }
+  });
+
+  // 📦 CONSTRUCCIÓN DEL PAQUETE DE DATOS OFICIAL
+  const payload = {
+    sale_ids: finalSaleIds, // <-- Aquí viaja la lista de vales llena y corregida
+    payments: payments.map(p => ({
+      amount: parseFloat(p.amount),
+      method: p.method,
+      yape_account: p.yape_account,
+      bank_account: p.bank_account
+    }))
+  };
+
+
+  // 🟢 MOTOR DE IMPRESIÓN DOCUMENTAL (Descarga Directa de PDF A4 y Ticket 80mm en Caliente)
+  const generateDocumentReport = (lote: any, format: "pdf" | "ticket") => {
+    const companyName = "Sistema junsu/kyf/noslight/jp.";
+    const clientName = selectedAccount?.name || "Cliente General";
+    const loteCode = lote.notes.replace('LOTE-VALORIZADO-', 'LOTE #');
+    const dateString = new Date(lote.created_at).toLocaleDateString("es-PE");
+    const cleanItems = lote.items?.filter((it: any) => it.quantity > 0) || [];
+    const paymentsList = lote.payments || [];
+
+    // 📄 CASO A: DESCARGA AUTOMÁTICA DE PDF PURO EN UN SOLO CLIC (Para Mandar por WhatsApp)
+    if (format === "pdf") {
+      try {
+        // Inicializamos la librería nativa jsPDF que ya tiene tu archivo
+        // 🟢 LLAMADO DIRECTO: Usa la instancia importada arriba de forma nativa
+        const doc = new jsPDF();
+
+        // Diseñamos el encabezado corporativo elegante
+        doc.setFont("Helvetica", "bold");
+        doc.setFontSize(20);
+        doc.text(companyName, 20, 20);
+
+        doc.setFontSize(10);
+        doc.setFont("Helvetica", "normal");
+        doc.text("Control Interno de Créditos y Cobranzas", 20, 26);
+
+        // Caja de Estado del Lote
+        const isPaid = lote.pending_balance <= 0;
+        doc.setFillColor(isPaid ? 209 : 254, isPaid ? 250 : 226, isPaid ? 229 : 226);
+        doc.rect(140, 13, 50, 14, "F");
+        doc.setFont("Helvetica", "bold");
+        doc.setFontSize(9);
+        doc.text(isPaid ? "TOTALMENTE PAGADO" : "CUENTA PENDIENTE", 143, 21);
+
+        // Tabla de Datos del Cliente
+        doc.setDrawColor(226, 232, 240);
+        doc.setFillColor(248, 250, 252);
+        doc.rect(20, 35, 170, 18, "FD");
+
+        doc.setFont("Helvetica", "bold");
+        doc.text("CLIENTE:", 25, 42); doc.setFont("Helvetica", "normal"); doc.text(clientName.toUpperCase(), 45, 42);
+        doc.setFont("Helvetica", "bold");
+        doc.text("DOCUMENTO:", 25, 48); doc.setFont("Helvetica", "normal"); doc.text(loteCode, 52, 48);
+        doc.setFont("Helvetica", "bold");
+        doc.text("FECHA:", 130, 42); doc.setFont("Helvetica", "normal"); doc.text(dateString, 150, 42);
+
+        // 📦 TITULO: MERCADERÍA DESPACHADA
+        doc.setFont("Helvetica", "bold");
+        doc.setFontSize(11);
+        doc.text("DESGLOSE DE MERCADERÍA DESPACHADA A CRÉDITO", 20, 63);
+
+        let currentY = 70;
+        doc.setFillColor(243, 244, 246);
+        doc.rect(20, currentY, 170, 8, "F");
+        doc.setFontSize(9);
+        doc.text("Cant.", 23, currentY + 6);
+        doc.text("Descripción del Producto", 45, currentY + 6);
+        doc.text("P. Unit.", 135, currentY + 6);
+        doc.text("Subtotal", 170, currentY + 6);
+        currentY += 8;
+
+
+        // 🟢 FORMATEO INDESTRUCIBLE: Soporte multi-línea automático para descripciones ultra-largas
+        cleanItems.forEach((it: any) => {
+          const fDespacho = it.fecha_despacho || dateString;
+          const pName = it.product_variant?.product?.name || "Artículo";
+          const total = (it.quantity * parseFloat(it.unit_price)).toFixed(2);
+
+          // Cantidad (Cant.) en su lugar fijo
+          doc.setFont("Helvetica", "normal");
+          doc.setFontSize(9);
+          doc.text(`${it.quantity}`, 23, currentY + 6);
+
+          // 🛡️ ESCUDO ANTI-DESBORDES: Corta el texto automáticamente si supera los 95mm de ancho
+          doc.setFont("Helvetica", "bold");
+          const splitName = doc.splitTextToSize(pName, 95);
+          doc.text(splitName, 32, currentY + 6);
+
+          // Calculamos cuántas líneas ocupó el nombre largo para empujar la fecha de despacho de forma dinámica
+          const linesOccupied = splitName.length;
+          const dateYOffset = 6 + (linesOccupied * 4.5); // Da un salto proporcional limpio hacia abajo
+
+          // Pintamos la fecha y hora calculando el desfase vertical dinámico
+          doc.setFont("Helvetica", "italic");
+          doc.setFontSize(8);
+          doc.setTextColor(100, 116, 139); // Gris contable
+          doc.text(`Despachado el: ${fDespacho} hrs`, 32, currentY + dateYOffset);
+
+          // Pintamos los montos de la derecha en sus coordenadas seguras fijas
+          doc.setFont("Helvetica", "normal");
+          doc.setFontSize(9);
+          doc.setTextColor(51, 51, 51);
+          doc.text(`S/ ${parseFloat(it.unit_price).toFixed(2)}`, 135, currentY + 6);
+          doc.text(`S/ ${total}`, 170, currentY + 6);
+
+          // Incrementamos el eje Y sumando el espacio dinámico que ocuparon las líneas del texto largo
+          currentY += dateYOffset + 6;
+        });
+
+
+
+        // 💰 TITULO: HISTORIAL DE COBRANZA
+        currentY += 10;
+        doc.setFont("Helvetica", "bold");
+        doc.setFontSize(11);
+        doc.text("HISTORIAL CRONOLÓGICO DE RECAUDACIÓN EN CAJA", 20, currentY);
+        currentY += 6;
+
+        if (paymentsList.length > 0) {
+          paymentsList.forEach((p: any) => {
+            const pDate = new Date(p.full_date || p.created_at).toLocaleDateString("es-PE");
+            doc.setFillColor(249, 250, 251);
+            doc.rect(20, currentY, 170, 8, "F");
+            doc.setFont("Helvetica", "normal");
+            doc.setFontSize(9);
+
+            // 🟢 INYECCIÓN DEL MÉTODO DE PAGO: Jalamos la propiedad p.method de forma limpia
+            const paymentMethodText = p.method ? `[${p.method}]` : '';
+            doc.text(`Abono realizado el ${pDate} a las ${p.time || 'hrs'} hrs mediante ${paymentMethodText} — `,  23, currentY + 6);
+
+            doc.setFont("Helvetica", "bold");
+            doc.text(`+ S/ ${parseFloat(p.amount).toFixed(2)}`, 170, currentY + 6);
+            currentY += 8;
+          });
+        } else {
+
+          doc.setFont("Helvetica", "italic");
+          doc.text("No se registran abonos parciales realizados a este lote.", 25, currentY + 6);
+          currentY += 8;
+        }
+
+        // Bloque de Totales Finales Cuadrados abajo a la derecha
+        currentY += 10;
+        doc.setFillColor(249, 250, 251);
+        doc.rect(120, currentY, 70, 24, "F");
+        doc.setFont("Helvetica", "normal");
+        doc.text("TOTAL VALORIZADO:", 123, currentY + 6); doc.text(`S/ ${parseFloat(lote.total_amount).toFixed(2)}`, 170, currentY + 6);
+        doc.text("TOTAL AMORTIZADO:", 123, currentY + 12); doc.text(`S/ ${parseFloat(lote.paid_amount).toFixed(2)}`, 170, currentY + 12);
+        doc.setDrawColor(200, 200, 200);
+        doc.line(123, currentY + 15, 187, currentY + 15);
+        doc.setFont("Helvetica", "bold");
+        doc.text("SALDO DEUDA:", 123, currentY + 21); doc.text(`S/ ${parseFloat(lote.pending_balance).toFixed(2)}`, 170, currentY + 21);
+
+        // 🔥 LA MAGIA DE LA DESCARGA INSTANTÁNEA:
+        // El navegador descarga el archivo de forma directa sin abrir pestañas feas
+        const cleanFileName = `ESTADO_CUENTA_${clientName.replace(/\s+/g, '_')}_${lote.notes}.pdf`;
+        doc.save(cleanFileName);
+
+      } catch (error) {
+        console.error("Error generando el PDF directo", error);
+        alert("Ocurrió un inconveniente técnico al armar el PDF. Por favor verifica las importaciones.");
+      }
+      return;
+    }
+
+    // 🖨️ CASO B: IMPRESIÓN DE TICKET TÉRMICO DE 80MM (Mantiene tu canal directo a la ticketera)
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return;
+
+    let itemsRows = "";
+    cleanItems.forEach((it: any) => {
+      const pName = it.product_variant?.product?.name || "Artículo";
+      itemsRows += `<tr><td>${it.quantity}x ${pName.substring(0, 18)}</td><td class="text-right">S/ ${(it.quantity * parseFloat(it.unit_price)).toFixed(2)}</td></tr>`;
+    });
+
+    let paymentsRows = "";
+    paymentsList.forEach((p: any) => {
+      paymentsRows += `<div>• ${new Date(p.full_date || p.created_at).toLocaleDateString("es-PE")} - ${p.method}: S/ ${parseFloat(p.amount).toFixed(2)}</div>`;
+    });
+
+    const htmlContent = `
+      <html>
+      <head>
+        <style>
+          body { font-family: 'Courier New', Courier, monospace; width: 76mm; padding: 3mm; color: #000; font-size: 11px; line-height: 1.3; }
+          .text-center { text-align: center; } .bold { font-weight: bold; }
+          .border-dashed { border-bottom: 1px dashed #000; padding: 4px 0; margin-bottom: 4px; }
+          table { width: 100%; border-collapse: collapse; } .text-right { text-align: right; }
+        </style>
+      </head>
+      <body>
+        <div class="text-center bold">${companyName}</div>
+        <div class="text-center">${loteCode}</div>
+        <div class="border-dashed"></div>
+        <div><span class="bold">Cliente:</span> ${clientName}</div>
+        <div><span class="bold">Fecha:</span> ${dateString}</div>
+        <div class="border-dashed"></div>
+        <div class="bold">📦 ARTÍCULOS:</div>
+        <table><tbody>${itemsRows}</tbody></table>
+        <div class="border-dashed"></div>
+        <div class="bold">💰 HISTORIAL ABONOS:</div>
+        ${paymentsRows || "<div>No registra abonos.</div>"}
+        <div class="border-dashed"></div>
+        <table class="bold">
+          <tr><td>TOTAL LOTE:</td><td class="text-right">S/ ${parseFloat(lote.total_amount).toFixed(2)}</td></tr>
+          <tr><td>AMORTIZADO:</td><td class="text-right">S/ ${parseFloat(lote.paid_amount).toFixed(2)}</td></tr>
+          <tr><td>SALDO DEUDA:</td><td class="text-right">S/ ${parseFloat(lote.pending_balance).toFixed(2)}</td></tr>
+        </table>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+    printWindow.setTimeout(() => {
+      printWindow.print();
+      printWindow.close();
+    }, 300);
+  };
+
+
+
+
+
   return (
     <div className="p-8 h-full flex flex-col bg-gray-50/50 relative">
       {/* CABECERA Y PESTAÑAS */}
@@ -945,28 +1405,27 @@ export default function CreditsPage() {
             Gestiona los despachos, fija precios y controla las deudas.
           </p>
         </div>
-        {/* 👇 AQUÍ ESTÁ EL CANDADO VISUAL 👇 */}
-        {isAdmin && (
-          <div className="flex bg-gray-200 p-1 rounded-2xl">
-            <button
-              onClick={() => setActiveTab("pendientes")}
-              className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm transition-all ${activeTab === "pendientes" ? "bg-white text-blue-700 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
-            >
-              <Clock size={18} /> Por Valorizar{" "}
-              {pendingSales.length > 0 && (
-                <span className="bg-red-500 text-white px-2 py-0.5 rounded-full text-xs">
-                  {pendingSales.length}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab("cuentas")}
-              className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm transition-all ${activeTab === "cuentas" ? "bg-white text-green-700 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
-            >
-              <Users size={18} /> Cuentas de Clientes
-            </button>
-          </div>
-        )}
+
+        <div className="flex bg-gray-200 p-1 rounded-2xl">
+          <button
+            onClick={() => setActiveTab("pendientes")}
+            className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm transition-all ${activeTab === "pendientes" ? "bg-white text-blue-700 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+          >
+            <Clock size={18} /> Por Valorizar{" "}
+            {pendingSales.length > 0 && (
+              <span className="bg-red-500 text-white px-2 py-0.5 rounded-full text-xs">
+                {pendingSales.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab("cuentas")}
+            className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm transition-all ${activeTab === "cuentas" ? "bg-white text-green-700 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+          >
+            <Users size={18} /> Cuentas de Clientes
+          </button>
+        </div>
+
       </div>
 
 
@@ -990,8 +1449,9 @@ export default function CreditsPage() {
 
       {/* ÁREA PRINCIPAL */}
       <div className="flex-1 bg-white border border-gray-200 rounded-4xl overflow-hidden shadow-sm flex flex-col">
+
         {/* ========================================================= */}
-        {/* VISTA 1: DESPACHOS PENDIENTES */}
+        {/* VISTA 1: DESPACHOS PENDIENTES DE VALORIZAR                 */}
         {/* ========================================================= */}
         {activeTab === "pendientes" && (
           <div className="flex-1 overflow-auto p-2">
@@ -1065,6 +1525,11 @@ export default function CreditsPage() {
           </div>
         )}
 
+
+
+
+
+
         {/* ========================================================= */}
         {/* VISTA 2: DIRECTORIO DE CUENTAS POR COBRAR */}
         {/* ========================================================= */}
@@ -1086,51 +1551,69 @@ export default function CreditsPage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
-                {filteredAccounts.map((account) => (
-                  <div
-                    key={account.id}
-                    className="bg-white border border-gray-200 rounded-3xl p-6 hover:shadow-lg transition-shadow flex flex-col"
-                  >
-                    <div className="flex justify-between items-start mb-4">
-                      <div className="flex items-center gap-3">
-                        <div className="bg-gray-100 text-gray-600 p-3 rounded-2xl">
-                          <Users size={24} />
-                        </div>
-                        <div>
-                          <h3
-                            className="font-black text-lg text-gray-900 line-clamp-1"
-                            title={account.name}
-                          >
-                            {account.name}
-                          </h3>
-                          <p className="text-xs font-bold text-gray-400 uppercase">
-                            {account.document_number || "Sin DNI/RUC"}
-                          </p>
+                {filteredAccounts.map((account) => {
+                  // Evaluamos en vivo si el cliente está al día o tiene deuda activa
+                  const isAlDia = parseFloat(account.credit_balance) <= 0;
+
+                  return (
+                    <div
+                      key={account.id}
+                      className={`bg-white border rounded-3xl p-6 hover:shadow-lg transition-shadow flex flex-col ${isAlDia ? "border-gray-200" : "border-red-200"
+                        }`}
+                    >
+                      <div className="flex justify-between items-start mb-4">
+                        <div className="flex items-center gap-3">
+                          <div className={`p-3 rounded-2xl ${isAlDia ? "bg-gray-100 text-gray-500" : "bg-red-50 text-red-600"
+                            }`}>
+                            <Users size={24} />
+                          </div>
+                          <div>
+                            <h3 className="font-black text-lg text-gray-900 line-clamp-1" title={account.name}>
+                              {account.name}
+                            </h3>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <p className="text-xs font-bold text-gray-400 uppercase">
+                                {account.document_number || "Sin DNI/RUC"}
+                              </p>
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ${isAlDia ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                                }`}>
+                                {isAlDia ? "✓ Al día" : "⚠️ Deudor"}
+                              </span>
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="bg-red-50 border border-red-100 rounded-2xl p-4 mb-4 flex-1">
-                      <p className="text-red-800 text-xs font-bold uppercase tracking-widest mb-1">
-                        Deuda Total Actual
-                      </p>
-                      <p className="text-3xl font-black text-red-600">
-                        S/ {parseFloat(account.credit_balance).toFixed(2)}
-                      </p>
-                    </div>
+                      {/* CASILLERO DE SALDOS BRUTOS MACRO */}
+                      <div className={`rounded-2xl p-4 mb-4 flex-1 border ${isAlDia ? "bg-gray-50 border-gray-100" : "bg-red-50 border-red-100"
+                        }`}>
+                        <p className={`text-xs font-bold uppercase tracking-widest mb-1 ${isAlDia ? "text-gray-500" : "text-red-800"}`}>
+                          Deuda Total Actual
+                        </p>
+                        <p className={`text-3xl font-black ${isAlDia ? "text-gray-400" : "text-red-600"}`}>
+                          S/ {parseFloat(account.credit_balance).toFixed(2)}
+                        </p>
+                      </div>
 
-                    <button
-                      onClick={() => openAccountStatement(account)}
-                      className="w-full bg-gray-900 hover:bg-black text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-colors"
-                    >
-                      <History size={18} /> Ver Historial y Abonar
-                    </button>
-                  </div>
-                ))}
+                      {/* 💼 EL BOTÓN DE ACCIÓN COMERCIAL LIMPIO QUE PLANIFICAMOS */}
+                      <button
+                        onClick={() => openAccountStatement(account)}
+                        className={`w-full font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-colors text-white ${isAlDia
+                          ? "bg-gray-700 hover:bg-gray-800"
+                          : "bg-gray-900 hover:bg-black"
+                          }`}
+                      >
+                        <History size={18} /> 💼 Ejecutar Crédito / Gestionar
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
         )}
+
+
       </div>
 
       {/* ========================================================= */}
@@ -1274,9 +1757,23 @@ export default function CreditsPage() {
                   {selectedAccount.name}
                 </p>
               </div>
+              {/* 🔍 BUSCA EL BOTÓN DE LA X EN LA CABECERA NEGRA Y DÉJALO ASÍ: */}
               <button
-                onClick={() => setSelectedAccount(null)}
-                className="text-gray-400 hover:text-white"
+                onClick={() => {
+                  // 1. Cerramos el modal limpiando el cliente seleccionado
+                  setSelectedAccount(null);
+                  // 2. 🛡️ LIMPIEZA ABSOLUTA DE RESIDUOS:
+                  // Apagamos los checks del carrusel y borramos el rastro del lote anterior
+                  setSelectedGroupCodes([]);
+                  setActiveDetailCode(null);
+                  if (typeof setActiveValePayments === "function") {
+                    setActiveValePayments([]);
+                  }
+                  // 3. Reiniciamos la pestaña por defecto
+                  setAccountTab("abono");
+                }}
+                className="text-gray-400 hover:text-white transition-colors p-1 rounded-lg hover:bg-gray-800"
+                title="Cerrar Expediente"
               >
                 <X size={28} />
               </button>
@@ -1307,504 +1804,674 @@ export default function CreditsPage() {
               </button>
             </div>
 
+
+
             {/* Cuerpo Escrolleable */}
             <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
-              {/* VISTA 1: FORMULARIO DE ABONO CON VUELTO */}
+
+
               {accountTab === "abono" && (
-                <div className="max-w-3xl mx-auto p-4">
-                  {/* Resumen superior - más pequeño */}
-                  <div className="grid grid-cols-2 gap-4 mb-6">
-                    <div className="bg-white rounded-2xl p-5 border border-red-100">
-                      <p className="text-xs font-bold text-red-500 tracking-widest">
-                        DEUDA ACTUAL
-                      </p>
-                      <p className="text-3xl font-black text-red-600 mt-1">
-                        S/{" "}
-                        {parseFloat(
-                          selectedAccount.credit_balance || "0",
-                        ).toFixed(2)}
-                      </p>
-                    </div>
+                <div className="space-y-5 p-2">
 
-                    <div className="bg-white rounded-2xl p-5 border border-green-100">
-                      <p className="text-xs font-bold text-green-600 tracking-widest">
-                        TOTAL RECIBIENDO
-                      </p>
-                      <p className="text-3xl font-black text-green-600 mt-1">
-                        S/{" "}
-                        {payments
-                          .reduce(
-                            (sum, p) => sum + (parseFloat(p.amount) || 0),
-                            0,
-                          )
-                          .toFixed(2)}
-                      </p>
-                    </div>
-                  </div>
+                  {/* 🗂️ A. CARRUSEL HORIZONTAL DE LOTES DE COBRO ABIERTOS */}
+                  <div className="bg-gray-50 border border-gray-200 rounded-3xl p-4">
+                    <p className="text-xs font-black text-gray-500 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                      🗂️ Selecciona los Lotes de Cobro a Pagar:
+                    </p>
+                    {(() => {
+                      const groups: Record<string, any[]> = {};
 
+                      selectedAccount?.sales?.forEach((sale: any) => {
+                        // 🔒 COMPATIBILIDAD INTEGRAL: Lee 'pending_balance' (nuevo) o calcula el saldo del vale (antiguo)
+                        const balance = sale.pending_balance !== undefined
+                          ? parseFloat(sale.pending_balance)
+                          : (parseFloat(sale.total_amount) - parseFloat(sale.paid_amount || 0));
 
+                        if (sale.status !== 'paid' && balance > 0) {
+                          // Detecta si es un documento unificado nuevo o un vale antiguo
+                          const code = sale.notes && (sale.notes.startsWith('LOTE-VALORIZADO-') || sale.notes.startsWith('DOC-COBRO-'))
+                            ? sale.notes
+                            : `DIRECTO-${sale.id}`;
 
-                  {/* Métodos de pago - 100% DINÁMICOS EN ESPEJO CON LA VENTA */}
-                  <div className="space-y-4">
-                    {payments.map((payment, index) => (
-                      <div
-                        key={payment.id}
-                        className="bg-white border border-gray-200 rounded-2xl p-5"
-                      >
-                        <div className="flex justify-between items-center mb-3">
-                          <h3 className="font-bold text-base">
-                            Pago #{index + 1}
-                          </h3>
-                          {index > 0 && (
-                            <button
-                              onClick={() => removePaymentLine(payment.id)}
-                              className="text-red-500 hover:text-red-600"
-                            >
-                              <X size={22} />
-                            </button>
-                          )}
-                        </div>
+                          if (!groups[code]) groups[code] = [];
 
-                        <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-                          {/* Método */}
-                          <div className="md:col-span-4">
-                            <label className="block text-xs font-bold text-gray-600 mb-1">
-                              MÉTODO
-                            </label>
-                            <select
-                              value={payment.method}
-                              onChange={(e) =>
-                                updatePayment(
-                                  payment.id,
-                                  "method",
-                                  e.target.value,
-                                )
+                          // Guardamos el saldo normalizado para que el resto del carrusel no se rompa
+                          groups[code].push({
+                            ...sale,
+                            pending_balance: balance
+                          });
+                        }
+                      });
+
+                      const groupKeys = Object.keys(groups);
+
+                      if (groupKeys.length === 0) {
+                        return (
+                          <p className="text-xs text-gray-400 font-medium text-center py-4">
+                            ✓ Este cliente no registra documentos con saldos pendientes actualmente.
+                          </p>
+                        );
+                      }
+
+                      return (
+                        <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin snap-x">
+                          {groupKeys.map((code) => {
+                            const sales = groups[code];
+                            const totalAmount = sales.reduce((acc, s) => acc + parseFloat(s.total_amount), 0);
+                            const pendingBalance = sales.reduce((acc, s) => acc + parseFloat(s.pending_balance), 0);
+                            const paidAmount = totalAmount - pendingBalance;
+                            const progressPercent = totalAmount > 0 ? (paidAmount / totalAmount) * 100 : 0;
+
+                            const isSelected = selectedGroupCodes.includes(code);
+
+                            // Extraemos la fecha del código del lote (LOTE-VALORIZADO-20260623-XXXXXX) para una lectura veloz
+                            let displayDate = "";
+                            if (code.startsWith('LOTE-VALORIZADO-')) {
+                              const rawDate = code.split('-')[2]; // '20260623'
+                              if (rawDate && rawDate.length === 8) {
+                                const day = rawDate.substring(6, 8);
+                                const monthNum = rawDate.substring(4, 6);
+                                const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+                                displayDate = ` 📅 ${day} de ${months[parseInt(monthNum) - 1] || 'Mes'}`;
                               }
-                              className="w-full border border-gray-300 rounded-2xl py-3 px-4 text-base bg-white"
-                            >
-                              <option value="efectivo">💵 Efectivo</option>
-                              <option value="yape">📱 Yape / Plin</option>
-                              <option value="transferencia">🏦 Transferencia</option>
-                            </select>
-                          </div>
+                            }
 
-                          {/* Monto */}
-                          <div className="md:col-span-3">
-                            <label className="block text-xs font-bold text-gray-600 mb-1">
-                              MONTO
-                            </label>
-                            <div className="relative">
-                              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-medium text-lg">
-                                S/
-                              </span>
-                              <input
-                                type="number"
-                                step="0.10"
-                                value={payment.amount}
-                                onChange={(e) =>
-                                  updatePayment(
-                                    payment.id,
-                                    "amount",
-                                    e.target.value,
-                                  )
-                                }
-                                className="w-full pl-10 py-3 border border-gray-300 rounded-2xl text-lg font-semibold"
-                                placeholder="0.00"
-                              />
-                            </div>
-                          </div>
+                            // Título comercial e imponente para el operario
+                            const displayTitle = code.startsWith('DIRECTO-') ? '📄 Documento Único' : '🧾 LOTE DE COBRO';
 
-                          {/* 📱 Selector dinámico de Yapes en espejo con la venta */}
-                          {payment.method === "yape" && (
-                            <div className="md:col-span-5">
-                              <label className="block text-xs font-bold text-gray-600 mb-1">
-                                CUENTA YAPE
-                              </label>
-                              <select
-                                value={payment.yape_account || ""}
-                                onChange={(e) =>
-                                  updatePayment(
-                                    payment.id,
-                                    "yape_account",
-                                    e.target.value,
-                                  )
-                                }
-                                className="w-full border border-gray-300 rounded-2xl py-3 px-4 text-base bg-white"
+                            return (
+                              <div
+                                key={code}
+                                onClick={() => {
+                                  if (isSelected) {
+                                    setSelectedGroupCodes(prev => prev.filter(c => c !== code));
+                                    if (activeDetailCode === code) setActiveDetailCode(null);
+                                  } else {
+                                    setSelectedGroupCodes(prev => [...prev, code]);
+                                    setActiveDetailCode(code);
+                                  }
+                                }}
+                                // 🎨 UX PREMIUM: Cambio drástico de fondo, bordes y escala táctil al seleccionar
+                                className={`snap-start min-w-[230px] p-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col justify-between select-none ${isSelected
+                                  ? "bg-white border-blue-600 shadow-lg ring-1 ring-blue-600/20 transform scale-[1.03]"
+                                  : "bg-gray-50/70 border-gray-200/80 hover:border-gray-300 hover:bg-gray-50"
+                                  }`}
                               >
-                                <option value="">Seleccionar cuenta...</option>
-                                {yapeAccounts.map((opt) => (
-                                  <option key={opt} value={opt}>
-                                    {opt}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          )}
+                                <div>
+                                  <div className="flex justify-between items-start mb-2">
+                                    <div>
+                                      <span className={`font-black text-xs tracking-wider uppercase block ${isSelected ? "text-blue-600" : "text-gray-700"
+                                        }`}>
+                                        {displayTitle}
+                                      </span>
+                                      <span className="text-[10px] text-gray-400 font-bold mt-0.5 block">
+                                        {displayDate || `📌 ID: ${code.replace('DIRECTO-', '')}`}
+                                      </span>
+                                    </div>
 
-                          {/* 🏦 Selector dinámico de Transferencias en espejo con la venta */}
-                          {payment.method === "transferencia" && (
-                            <div className="md:col-span-5">
-                              <label className="block text-xs font-bold text-gray-600 mb-1">
-                                CUENTA BANCARIA
-                              </label>
-                              <select
-                                value={payment.bank_account || ""}
-                                onChange={(e) =>
-                                  updatePayment(
-                                    payment.id,
-                                    "bank_account",
-                                    e.target.value,
-                                  )
-                                }
-                                className="w-full border border-gray-300 rounded-2xl py-3 px-4 text-base bg-white"
-                              >
-                                <option value="">Seleccionar cuenta...</option>
-                                {bankAccounts.map((opt) => (
-                                  <option key={opt} value={opt}>
-                                    {opt}
-                                  </option>
-                                ))}
-                              </select>
+                                    {/* ☑️ CHECKBOX ULTRA DIRECTO Y GRANDE PARA EL OPERARIO */}
+                                    <span className={`w-5 h-5 rounded-full border-2 flex items-center justify-center text-[10px] transition-all ${isSelected
+                                      ? "bg-blue-600 border-blue-600 text-white font-black shadow-sm"
+                                      : "border-gray-300 bg-white"
+                                      }`}>
+                                      {isSelected ? "✓" : ""}
+                                    </span>
+                                  </div>
+
+                                  <p className="text-[11px] font-bold text-gray-500 bg-gray-100/60 inline-block px-2 py-0.5 rounded-lg border border-gray-200/40">
+                                    💼 {sales.length} {sales.length === 1 ? 'vale agrupado' : 'vales consolidados'}
+                                  </p>
+                                </div>
+
+                                {/* 📊 SECCIÓN FINANCIERA INTERNA (SALDOS Y PROGRESO) */}
+                                <div className="mt-4 pt-3 border-t border-dashed border-gray-200">
+                                  <div className="flex justify-between items-baseline mb-1.5">
+                                    <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Saldo Restante</span>
+                                    <span className={`font-mono text-base font-black ${isSelected ? "text-blue-700" : "text-gray-900"
+                                      }`}>
+                                      S/ {pendingBalance.toFixed(2)}
+                                    </span>
+                                  </div>
+
+                                  {/* Riel estilizado con indicador esmeralda para amortizaciones */}
+                                  <div className="w-full bg-gray-200/70 rounded-full h-1.5 mb-1 overflow-hidden">
+                                    <div
+                                      className="bg-emerald-500 h-1.5 rounded-full transition-all duration-300"
+                                      style={{ width: `${progressPercent}%` }}
+                                    ></div>
+                                  </div>
+
+                                  <div className="flex justify-between text-[9px] font-extrabold text-gray-400 tracking-wide">
+                                    <span>Total: S/ {totalAmount.toFixed(2)}</span>
+                                    <span className="text-emerald-600 font-black">{progressPercent.toFixed(0)}% pagado</span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                        </div>
+                      );
+                    })()}
+
+
+
+                  </div>
+                  {/* 🟢 SECCIÓN INTERACTIVA TRAS SELECCIONAR TARJETAS EN EL SLIDER */}
+                  {selectedGroupCodes.length > 0 ? (
+                    <>
+                      {/* Bloques de Monto Acumulado en Caliente (CORREGIDO ANTI-BUGS) */}
+                      {(() => {
+                        let aggregatedPending = 0;
+                        selectedAccount?.sales?.forEach((sale: any) => {
+                          // 🟢 DETECCIÓN FLEXIBLE: Si la nota empieza con LOTE o DOC-COBRO, asumimos el string real de la nota
+                          const code = sale.notes && (
+                            sale.notes.startsWith('LOTE-VALORIZADO-') ||
+                            sale.notes.startsWith('LOTE-') ||
+                            sale.notes.startsWith('DOC-COBRO-')
+                          ) ? sale.notes : `DIRECTO-${sale.id}`;
+
+                          if (selectedGroupCodes.includes(code)) {
+                            aggregatedPending += parseFloat(sale.pending_balance || 0);
+                          }
+                        });
+
+                        return (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="bg-red-50 border border-red-100 rounded-3xl p-5 border-l-4 border-l-red-500 shadow-sm">
+                              <p className="text-red-800 text-xs font-black uppercase tracking-widest mb-1">
+                                Monto Seleccionado a Pagar
+                              </p>
+                              <p className="text-3xl font-black text-red-600">
+                                S/ {aggregatedPending.toFixed(2)}
+                              </p>
+                              <p className="text-[10px] text-red-400 font-medium mt-1">
+                                Suma combinada de los {selectedGroupCodes.length} lotes marcados arriba.
+                              </p>
                             </div>
-                          )}
+
+                            <div className="bg-green-50 border border-green-100 rounded-3xl p-5 border-l-4 border-l-green-500 shadow-sm">
+                              <p className="text-green-800 text-xs font-black uppercase tracking-widest mb-1">
+                                Total Recibiendo en Caja
+                              </p>
+                              <p className="text-3xl font-black text-green-600">
+                                S/ {payments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0).toFixed(2)}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* 📑 B. DESGLOSE EXPRESS INFERIOR CON PRODUCTOS */}
+                      {/* 📑 B. DESGLOSE EXPRESS INFERIOR CON PRODUCTOS (VERSIÓN LIMPIA) */}
+                      <div className="bg-white border border-gray-200 rounded-2xl p-4">
+                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-1">
+                          🔍 Vista Rápida de Productos de los Lotes Seleccionados:
+                        </p>
+
+                        {/* 🟢 SE REMOVIÓ EL CONTENEDOR DE BOTONES REDUNDANTES QUE ABARROTABA LA PANTALLA */}
+
+                        <div className="bg-gray-50 rounded-xl p-3 border border-gray-100 text-xs max-h-56 overflow-y-auto space-y-4">
+                          {(() => {
+                            // 🟢 SI NO HAY NINGUNA TARJETA MARCADA CON EL CHECK AZUL, MOSTRAMOS EL TEXTO GUÍA
+                            if (!selectedGroupCodes || selectedGroupCodes.length === 0) {
+                              return <p className="text-gray-400 font-medium text-center py-2">Selecciona al menos un lote de cobro del carrusel superior para auditar sus detalles y abonos.</p>;
+                            }
+
+                            // 🟢 MOTOR DE RENDERIZADO INDEPENDIENTE AUTOMÁTICO:
+                            return selectedGroupCodes.map((currentCode) => {
+                              // Filtramos las ventas del cliente que coincidan exactamente con este código marcado
+                              const targetSales = selectedAccount?.sales?.filter((sale: any) => {
+                                const code = sale.notes && (sale.notes.startsWith('LOTE-VALORIZADO-') || sale.notes.startsWith('DOC-COBRO-'))
+                                  ? sale.notes
+                                  : `DIRECTO-${sale.id}`;
+                                return code === currentCode;
+                              });
+
+                              if (!targetSales || targetSales.length === 0) return null;
+
+                              return (
+                                <div key={currentCode} className="bg-white p-3 rounded-xl border border-gray-200/70 shadow-sm space-y-2">
+                                  <p className="text-[10px] font-black text-blue-600 uppercase tracking-wider bg-blue-50 px-2 py-0.5 rounded inline-block">
+                                    📦 DETALLE COMPROBANTE: {currentCode.replace('LOTE-VALORIZADO-', 'LOTE-').replace('DOC-COBRO-', 'LOTE-')}
+                                  </p>
+
+                                  {targetSales.map((sale: any) => {
+                                    // Limpiamos el ID de texto para pasárselo de forma segura al componente satélite
+                                    const cleanNumericId = parseInt(String(sale.id).replace('lote_', ''), 10);
+
+                                    return (
+                                      <div key={sale.id} className="border-l-2 border-gray-300 pl-2 space-y-1.5">
+                                        <p className="text-[9px] font-bold text-gray-400 uppercase">
+                                          Vale original: {sale.receipt_number || 'N/A'} — Retirado: {sale.created_at ? new Date(sale.created_at).toLocaleDateString("es-PE") : 'Hoy'}
+                                        </p>
+
+                                        {sale.items?.map((it: any) => {
+                                          // 🟢 Si es el encabezado del vale (unidades en 0), lo pintamos destacado
+                                          if (it.quantity === 0) {
+                                            return (
+                                              <p key={it.id} className="text-blue-600 font-black text-[10px] bg-blue-50/60 px-1.5 py-0.5 rounded inline-block mt-2 uppercase tracking-wide w-full">
+                                                {it.product_variant?.product?.name}
+                                              </p>
+                                            );
+                                          }
+                                          // Si es un producto real, lo dejamos exactamente con el formato nativo original
+                                          return (
+                                            <p key={it.id} className="text-gray-600 font-medium mt-0.5 pl-2">
+                                              • {it.quantity} und. x {it.product_variant?.product?.name || "Artículo"} (S/ {parseFloat(it.unit_price).toFixed(2)})
+                                            </p>
+                                          );
+                                        })}
+
+
+                                        {/* 🔒 COMPONENTE AISLADO EN SU PROPIO ARCHIVO: */}
+                                        <ValePaymentsExpress saleId={cleanNumericId} />
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            });
+                          })()}
                         </div>
                       </div>
-                    ))}
-                  </div>
 
 
+                      {/* 💵 C. PASARELA MIXTA DINÁMICA DE COBRO */}
+                      <div className="space-y-4">
+                        {payments.map((payment, index) => (
+                          <div key={payment.id} className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
+                            <div className="flex justify-between items-center mb-3">
+                              <h3 className="font-bold text-sm text-gray-700">Línea de Pago #{index + 1}</h3>
+                              {index > 0 && (
+                                <button type="button" onClick={() => removePaymentLine(payment.id)} className="text-red-500 hover:text-red-600 text-xs font-bold">
+                                  ❌ Quitar
+                                </button>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                              <div className="md:col-span-4">
+                                <label className="block text-[10px] font-black text-gray-500 mb-1 uppercase tracking-wider">Método</label>
+                                <select
+                                  value={payment.method}
+                                  onChange={(e) => updatePayment(payment.id, "method", e.target.value)}
+                                  className="w-full border border-gray-300 rounded-xl py-2.5 px-3 text-sm bg-white"
+                                >
+                                  <option value="efectivo">💵 Efectivo</option>
+                                  <option value="yape">📱 Yape / Plin</option>
+                                  <option value="transferencia">🏦 Transferencia</option>
+                                </select>
+                              </div>
+                              <div className="md:col-span-3">
+                                <label className="block text-[10px] font-black text-gray-500 mb-1 uppercase tracking-wider">Monto Soles</label>
+                                <input
+                                  type="number"
+                                  step="0.10"
+                                  value={payment.amount}
+                                  onChange={(e) => updatePayment(payment.id, "amount", e.target.value)}
+                                  className="w-full py-2 px-3 border border-gray-300 rounded-xl font-bold text-sm text-right"
+                                  placeholder="0.00"
+                                />
+                              </div>
+                              {payment.method === "yape" && (
+                                <div className="md:col-span-5">
+                                  <label className="block text-[10px] font-black text-gray-500 mb-1 uppercase tracking-wider">Cuenta Destino</label>
+                                  <select
+                                    value={payment.yape_account || ""}
+                                    onChange={(e) => updatePayment(payment.id, "yape_account", e.target.value)}
+                                    className="w-full border border-gray-300 rounded-xl py-2.5 px-3 text-sm bg-white"
+                                  >
+                                    <option value="">Seleccionar cuenta...</option>
+                                    {yapeAccounts.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                                  </select>
+                                </div>
+                              )}
+                              {payment.method === "transferencia" && (
+                                <div className="md:col-span-5">
+                                  <label className="block text-[10px] font-black text-gray-500 mb-1 uppercase tracking-wider">Banco Destino</label>
+                                  <select
+                                    value={payment.bank_account || ""}
+                                    onChange={(e) => updatePayment(payment.id, "bank_account", e.target.value)}
+                                    className="w-full border border-gray-300 rounded-xl py-2.5 px-3 text-sm bg-white"
+                                  >
+                                    <option value="">Seleccionar cuenta...</option>
+                                    {bankAccounts.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                                  </select>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                        <button type="button" onClick={addPaymentLine} className="text-xs font-black text-blue-600 hover:text-blue-800 bg-blue-50 px-4 py-2.5 rounded-xl border border-blue-100">
+                          ➕ Agregar otro método mixto
+                        </button>
+                      </div>
 
+                      {/* 🔘 BOTONES DE ACCIÓN PRINCIPALES DE COBRO */}
+                      <div className="grid grid-cols-2 gap-3 mt-6">
+                        <button
+                          type="button"
+                          onClick={() => handleAddPayment("print")}
+                          disabled={isProcessingPayment}
+                          className="bg-gray-900 hover:bg-black text-white font-black py-4 rounded-2xl text-base transition-all disabled:opacity-50"
+                        >
+                          🖨️ Cobrar e Imprimir
+                        </button>
 
-
-
-                  <button
-                    onClick={addPaymentLine}
-                    className="mt-4 text-blue-600 font-medium text-sm flex items-center gap-1"
-                  >
-                    + Agregar otro método
-                  </button>
-
-                  {/* Botones de acción actualizados */}
-                  <div className="grid grid-cols-2 gap-3 mt-8">
-                    <button
-                      onClick={() => handleAddPayment("print")}
-                      disabled={
-                        isProcessingPayment ||
-                        payments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0) <= 0
-                      }
-                      className="bg-gray-900 hover:bg-black text-white font-bold text-lg py-5 rounded-3xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      🖨️ Cobrar e Imprimir
-                    </button>
-
-                    <button
-                      onClick={() => handleAddPayment("no-print")}
-                      disabled={
-                        isProcessingPayment ||
-                        payments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0) <= 0
-                      }
-                      className="bg-green-600 hover:bg-green-700 text-white font-bold text-lg py-5 rounded-3xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      ✅ Cobrar sin Imprimir
-                    </button>
-                  </div>
+                        <button
+                          type="button"
+                          onClick={() => handleAddPayment("no-print")}
+                          disabled={isProcessingPayment}
+                          className="bg-green-600 hover:bg-green-700 text-white font-black py-4 rounded-2xl text-base transition-all disabled:opacity-50"
+                        >
+                          ✅ Cobrar sin Imprimir
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="p-12 border border-dashed rounded-3xl text-center text-gray-400 font-bold bg-gray-50/50 text-sm">
+                      👉 Selecciona al menos un lote de cobro del carrusel superior para activar la pasarela de pagos.
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* VISTA 2: HISTORIAL DETALLADO (EFECTO ACORDEÓN POR DÍAS) */}
+
+
+
               {accountTab === "historial" && (
-                <div className="flex flex-col h-full">
-                  {/* Cabecera y Filtros */}
-                  <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-4 px-2 gap-4">
-                    <div>
-                      <div className="flex gap-2">
-                        {/* Cabecera y Filtros (Calendarios) */}
-                        <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-4 px-2 gap-4">
-                          <div className="w-full md:w-auto">
-                            <h3 className="font-black text-xl text-gray-800 mb-2">
-                              Estado de Cuenta
-                            </h3>
+                <div className="space-y-6 p-2">
 
-                            <div className="flex flex-wrap items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm mb-3">
-                              <span className="text-xs font-bold text-gray-400 uppercase">
-                                Desde
-                              </span>
-                              <input
-                                type="date"
-                                value={startDate}
-                                onChange={(e) => {
-                                  setStartDate(e.target.value);
-                                  openAccountStatement(
-                                    selectedAccount,
-                                    e.target.value,
-                                    endDate,
-                                  );
-                                }}
-                                className="text-gray-700 text-sm font-bold bg-transparent focus:outline-none"
-                              />
-                              <span className="text-xs font-bold text-gray-400 uppercase ml-2">
-                                Hasta
-                              </span>
-                              <input
-                                type="date"
-                                value={endDate}
-                                onChange={(e) => {
-                                  setEndDate(e.target.value);
-                                  openAccountStatement(
-                                    selectedAccount,
-                                    startDate,
-                                    e.target.value,
-                                  );
-                                }}
-                                className="text-gray-700 text-sm font-bold bg-transparent focus:outline-none"
-                              />
-                            </div>
-
-                            {/* LOS NUEVOS BOTONES DE FILTRO RÁPIDO */}
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                onClick={() => setMovementFilter("all")}
-                                className={`px-5 py-2 text-sm font-bold rounded-xl transition-all ${movementFilter === "all"
-                                  ? "bg-gray-900 text-white shadow"
-                                  : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
-                                  }`}
-                              >
-                                Todos
-                              </button>
-                              <button
-                                onClick={() => setMovementFilter("sales")}
-                                className={`px-5 py-2 text-sm font-bold rounded-xl transition-all ${movementFilter === "sales"
-                                  ? "bg-red-600 text-white shadow"
-                                  : "bg-white border border-red-200 text-red-600 hover:bg-red-50"
-                                  }`}
-                              >
-                                Solo Deudas
-                              </button>
-                              <button
-                                onClick={() => setMovementFilter("payments")}
-                                className={`px-5 py-2 text-sm font-bold rounded-xl transition-all ${movementFilter === "payments"
-                                  ? "bg-green-600 text-white shadow"
-                                  : "bg-white border border-green-200 text-green-600 hover:bg-green-50"
-                                  }`}
-                              >
-                                Solo Pagos
-                              </button>
-                              <button
-                                onClick={clearAllFilters}
-                                className="px-5 py-2 text-sm font-bold rounded-xl bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-all flex items-center gap-1.5"
-                              >
-                                <X size={16} /> Limpiar Filtros
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="text-right w-full md:w-auto bg-gray-100 p-3 rounded-xl">
-                            <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">
-                              Saldo Deudor Final
-                            </p>
-                            <p className="text-2xl font-black text-gray-900">
-                              S/{" "}
-                              {parseFloat(
-                                selectedAccount.credit_balance,
-                              ).toFixed(2)}
-                            </p>
-                          </div>
-                        </div>
+                  {/* 📊 INDICADORES DE AUDITORÍA COMERCIAL (Métricas en Caliente) */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-blue-50/60 border border-blue-100 rounded-3xl p-4 flex items-center gap-3">
+                      <div className="p-3 bg-blue-500 text-white rounded-2xl shadow-sm"><History size={20} /></div>
+                      <div>
+                        <p className="text-[10px] font-black text-blue-400 uppercase tracking-wider">Días de Pago Promedio</p>
+                        <p className="text-xl font-black text-blue-700">{selectedAccount?.metrics?.avg_days_to_pay || 0} Días</p>
+                      </div>
+                    </div>
+                    <div className="bg-emerald-50/60 border border-emerald-100 rounded-3xl p-4 flex items-center gap-3">
+                      <div className="p-3 bg-emerald-500 text-white rounded-2xl shadow-sm"><CheckCircle size={20} /></div>
+                      <div>
+                        <p className="text-[10px] font-black text-emerald-400 uppercase tracking-wider">Documentos Archivados</p>
+                        <p className="text-xl font-black text-emerald-700">{selectedAccount?.paid_lotes?.length || 0} Lotes</p>
+                      </div>
+                    </div>
+                    <div className="bg-purple-50/60 border border-purple-100 rounded-3xl p-4 flex items-center gap-3">
+                      <div className="p-3 bg-purple-500 text-white rounded-2xl shadow-sm"><FileText size={20} /></div>
+                      <div>
+                        <p className="text-[10px] font-black text-purple-400 uppercase tracking-wider">Récord Comercial</p>
+                        <span className={`text-xs font-black px-2 py-0.5 rounded-lg inline-block mt-1 ${selectedAccount?.metrics?.general_punctuality === "EXCELENTE" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-orange-700"
+                          }`}>
+                          {selectedAccount?.metrics?.general_punctuality || "SIN REGISTROS"}
+                        </span>
                       </div>
                     </div>
                   </div>
-                  <div className="space-y-4 flex-1 overflow-y-auto pb-4 px-2">
-                    {isLoadingStatement ? (
-                      <div className="flex justify-center items-center py-10">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                        <span className="ml-3 font-bold text-gray-500">
-                          Buscando movimientos...
-                        </span>
+
+                  {/* 🔍 PANEL DE FILTRADO EN CALIENTE */}
+                  <div className="bg-white border border-gray-200/80 rounded-3xl p-4 shadow-sm flex flex-col md:flex-row gap-3 items-center justify-between">
+                    <p className="text-xs font-black text-gray-400 uppercase tracking-widest shrink-0">
+                      🕵️‍♂️ Buscador de Lotes Archivados:
+                    </p>
+                    <div className="w-full md:w-72">
+                      <input
+                        type="text"
+                        placeholder="Buscar por código de lote (Ej: 2026)..."
+                        onChange={(e) => {
+                          const val = e.target.value.toLowerCase();
+                          const cards = document.querySelectorAll(".paid-lote-card");
+                          cards.forEach((card: any) => {
+                            const code = card.getAttribute("data-code")?.toLowerCase() || "";
+                            card.style.display = code.includes(val) ? "block" : "none";
+                          });
+                        }}
+                        className="w-full text-xs font-medium bg-gray-50 border border-gray-200 rounded-2xl py-2.5 px-3 focus:outline-none focus:border-blue-500 transition-colors"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 📜 LISTADO DE TARJETAS HISTÓRICAS PAGADAS COMPACTAS */}
+                  <div className="space-y-3">
+                    {!selectedAccount?.paid_lotes || selectedAccount.paid_lotes.length === 0 ? (
+                      <div className="text-center py-10 bg-white border border-gray-200 rounded-3xl">
+                        <p className="text-gray-400 text-sm font-medium">Este cliente no registra lotes cancelados en el historial actualmente.</p>
                       </div>
-                    ) : getFilteredHistory().length === 0 ? (
-                      <p className="text-center text-gray-500 italic mt-10">
-                        No hay movimientos con el filtro seleccionado.
-                      </p>
                     ) : (
-                      getFilteredHistory().map((dayGroup: any) => (
-                        <div
-                          key={dayGroup.date}
-                          className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm transition-all"
-                        >
-                          {/* Cabecera del Día */}
+                      selectedAccount.paid_lotes.map((lote: any) => {
+                        const isExpanded = expandedLoteId === lote.id;
+                        return (
                           <div
-                            onClick={() => toggleDay(dayGroup.date)}
-                            className="p-4 bg-gray-50 flex justify-between items-center cursor-pointer hover:bg-gray-100 transition-colors"
+                            key={lote.id}
+                            data-code={lote.notes}
+                            className="paid-lote-card bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden hover:border-gray-300 transition-all"
                           >
-                            <div>
-                              <p className="font-black text-gray-900 capitalize flex items-center gap-2">
-                                📅{" "}
-                                {new Date(
-                                  dayGroup.date + "T00:00:00",
-                                ).toLocaleDateString("es-PE", {
-                                  weekday: "long",
-                                  day: "numeric",
-                                  month: "long",
-                                  year: "numeric",
-                                })}
-                              </p>
-                              <div className="flex gap-4 mt-1 text-xs font-bold">
-                                {dayGroup.daily_sales > 0 && (
-                                  <span className="text-red-600">
-                                    Consumos: S/{" "}
-                                    {dayGroup.daily_sales.toFixed(2)}
-                                  </span>
-                                )}
-                                {dayGroup.daily_payments > 0 && (
-                                  <span className="text-green-600">
-                                    Abonos: S/{" "}
-                                    {dayGroup.daily_payments.toFixed(2)}
-                                  </span>
-                                )}
+                            {/* Barra Superior del Acordeón (Gatillo de Clic) */}
+                            <div
+                              onClick={() => setExpandedLoteId(isExpanded ? null : lote.id)}
+                              className="p-4 flex justify-between items-center bg-gray-50/40 cursor-pointer select-none border-b border-gray-100 hover:bg-gray-50 transition-colors"
+                            >
+                              <div className="flex items-center gap-3">
+                                <span className="text-gray-400 font-bold text-xs">{isExpanded ? "🔽" : "▶️"}</span>
+                                <div>
+                                  <p className="text-xs font-black text-gray-800 font-mono flex items-center gap-1.5">
+                                    📄 {lote.notes.replace('LOTE-VALORIZADO-', 'LOTE #')}
+                                  </p>
+                                  <p className="text-[10px] text-gray-400 font-bold mt-0.5">
+                                    Concluido tras <strong className="text-blue-600 font-black">{lote.days_to_pay} {lote.days_to_pay === 1 ? 'día' : 'días'}</strong> de financiamiento.
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[9px] font-black px-2 py-0.5 rounded-md ${lote.punctuality === "EXCELENTE" ? "bg-emerald-50 text-emerald-600 border border-emerald-100" : "bg-amber-50 text-amber-600 border border-amber-100"
+                                  }`}>
+                                  ✨ {lote.punctuality}
+                                </span>
+                                <span className="bg-emerald-600 text-white font-black text-[9px] px-2 py-0.5 rounded-lg uppercase tracking-wider">
+                                  S/ {parseFloat(lote.total_amount).toFixed(2)}
+                                </span>
                               </div>
                             </div>
-                            <div
-                              className={`p-2 bg-white rounded-full shadow-sm text-gray-500 transition-transform duration-300 ${expandedDays.includes(dayGroup.date)
-                                ? "rotate-180"
-                                : ""
-                                }`}
-                            >
-                              <ChevronDown size={20} />
-                            </div>
-                          </div>
 
-                          {/* Movimientos filtrados */}
-                          {expandedDays.includes(dayGroup.date) && (
-                            <div className="divide-y divide-gray-100 border-t border-gray-200 bg-white">
-                              {dayGroup.movements.map((mov: any, i: number) => (
-                                <div
-                                  key={i}
-                                  className="p-4 flex justify-between items-start hover:bg-blue-50/30 transition-colors"
-                                >
-                                  <div className="flex-1 pr-4">
-                                    <div className="flex items-center gap-2 mb-1">
-                                      {mov.is_payment ? (
-                                        <>
-                                          <span className="bg-green-100 text-green-700 text-[10px] font-black px-2 py-0.5 rounded-md flex items-center gap-1">
-                                            💰 {mov.method || "ABONO"}
-                                          </span>
-                                          <span className="text-[10px] font-black uppercase text-gray-400">
-                                            {mov.time}
-                                          </span>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <span className="bg-red-100 text-red-700 text-[10px] font-black px-2 py-0.5 rounded-md flex items-center gap-1">
-                                            <Clock size={10} /> {mov.time}
-                                          </span>
-                                          <span className="text-[10px] font-black uppercase text-red-600">
-                                            {mov.type}
-                                          </span>
-                                        </>
-                                      )}
-                                    </div>
-                                    <p className="font-bold text-gray-900 leading-tight">
-                                      {mov.description}
-                                    </p>
-                                    {mov.details && (
-                                      <p className="text-xs text-gray-500 font-medium mt-1">
-                                        {mov.details
-                                          .map(
-                                            (d: any) =>
-                                              `${d.quantity}x ${d.product_variant?.product?.name || "Prod."}`,
-                                          )
-                                          .join(", ")}
-                                      </p>
-                                    )}
-                                  </div>
-                                  <div
-                                    className={`font-black text-lg shrink-0 ${mov.is_payment
-                                      ? "text-green-600"
-                                      : "text-red-600"
-                                      }`}
-                                  >
-                                    {mov.is_payment ? "-" : "+"} S/{" "}
-                                    {parseFloat(mov.amount).toFixed(2)}
+                            {/* Cuerpo Interno Desplegable: Solo se renderiza en pantalla si el cajero le da clic */}
+                            {isExpanded && (
+                              <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs bg-white animation-fade-in animate-duration-200">
+
+                                {/* Columna Izquierda: Mercadería */}
+                                <div className="bg-gray-50/60 border border-gray-200/50 rounded-xl p-3 space-y-2">
+                                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-200/60 pb-1">
+                                    📦 Resumen de Mercadería Despachada:
+                                  </p>
+                                  <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                                    {lote.items?.map((it: any) => {
+                                      if (it.quantity === 0) {
+                                        return (
+                                          <p key={it.id} className="text-blue-600 font-black text-[9px] bg-blue-50/80 px-1.5 py-0.5 rounded inline-block mt-1.5 uppercase tracking-wide w-full">
+                                            {it.product_variant?.product?.name}
+                                          </p>
+                                        );
+                                      }
+                                      return (
+                                        <p key={it.id} className="text-gray-600 font-medium pl-2 text-[11px]">
+                                          • {it.quantity} und. x {it.product_variant?.product?.name || "Artículo"} (S/ {parseFloat(it.unit_price).toFixed(2)})
+                                        </p>
+                                      );
+                                    })}
                                   </div>
                                 </div>
-                              ))}
-                            </div>
-                          )}
+
+                                {/* Columna Derecha: Recaudación */}
+                                <div className="bg-emerald-50/10 border border-emerald-100 rounded-xl p-3 space-y-2">
+                                  <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest border-b border-emerald-100/60 pb-1">
+                                    💰 Línea de Tiempo de Recaudación en Caja:
+                                  </p>
+                                  <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                                    {lote.payments && lote.payments.length > 0 ? (
+                                      lote.payments.map((p: any) => (
+                                        <div key={p.id} className="flex justify-between items-center bg-white p-2 rounded-xl border border-emerald-100 text-[10px] shadow-sm">
+                                          <div>
+                                            <p className="font-bold text-gray-700">{p.description}</p>
+                                            <p className="text-[8px] text-gray-400 font-semibold mt-0.5">
+                                              📅 {p.date} a las {p.time} hrs — <span className="px-1 bg-gray-100 text-gray-600 rounded font-mono uppercase text-[7px]">{p.method}</span>
+                                            </p>
+                                          </div>
+                                          <span className="font-black text-emerald-600 shrink-0 ml-2">+ S/ {parseFloat(p.amount).toFixed(2)}</span>
+                                        </div>
+                                      ))
+                                    ) : (
+                                      <p className="text-gray-400 text-center py-4 font-medium italic">No se registran transacciones individuales de cobro.</p>
+                                    )}
+                                  </div>
+                                </div>
+
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+
+
+
+                    )}
+                  </div>
+
+                  {/* 🔘 BOTÓN DE CONTINGENCIA: CARGAR MÁS LOTES ANTIGUOS */}
+                  {selectedAccount?.has_more && (
+                    <div className="text-center pt-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const token = localStorage.getItem("noslight_token");
+                            // Calculamos la siguiente página de deudas antiguas (ej: página 2)
+                            const nextPage = Math.floor((selectedAccount.paid_lotes?.length || 0) / 10) + 1;
+
+                            const res = await fetch(
+                              `${import.meta.env.VITE_API_URL}/api/credits/customers/${selectedAccount.id}/statement?page=${nextPage}`,
+                              { headers: { Authorization: `Bearer ${token}` } }
+                            );
+
+                            if (res.ok) {
+                              const freshData = await res.json();
+                              setSelectedAccount((prev: any) => ({
+                                ...prev,
+                                has_more: freshData.has_more,
+                                // 🟢 CONCATENACIÓN LIMPIA: Fusionamos los 10 nuevos viejos abajo de la lista actual
+                                paid_lotes: [...(prev.paid_lotes || []), ...(freshData.paid_lotes || [])]
+                              }));
+                            }
+                          } catch (e) {
+                            console.error("Error al paginar historial antiguo", e);
+                          }
+                        }}
+                        className="w-full sm:w-auto text-xs font-black text-gray-600 hover:text-gray-900 bg-white border border-gray-300 shadow-sm px-6 py-3 rounded-2xl transition-all hover:bg-gray-50 flex items-center justify-center gap-1.5 mx-auto"
+                      >
+                        🔄 Cargar Lotes Más Antiguos
+                      </button>
+                    </div>
+                  )}
+
+                </div>
+              )}
+
+
+              {/* ========================================================= */}
+              {/* 🟢 PESTAÑA: CENTRO DE EMISIÓN DE PROFORMAS Y COMPROBANTES  */}
+              {/* ========================================================= */}
+              {accountTab === "cobranza" && (
+                <div className="space-y-6 p-2 text-xs">
+
+                  <div className="bg-amber-50 border border-amber-200 rounded-3xl p-5 border-l-4 border-l-amber-500 shadow-sm">
+                    <h3 className="text-amber-900 font-black text-sm uppercase tracking-wider">Centro de Despacho Documental</h3>
+                    <p className="text-gray-600 font-medium mt-1">
+                      Selecciona un documento para generar su reporte detallado en PDF o imprimir su ticket de control.
+                    </p>
+                  </div>
+
+                  {/* 🔴 SECCIÓN 1: DOCUMENTOS VIGENTES (DEUDAS ACTIVAS) */}
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-black text-red-500 uppercase tracking-widest border-b border-gray-200 pb-1">
+                      📌 Lotes de Cobro Activos (Cuentas Pendientes):
+                    </p>
+                    {!selectedAccount?.sales || selectedAccount.sales.filter((l: any) => l.pending_balance > 0).length === 0 ? (
+                      <p className="text-gray-400 italic pl-2">No registra deudas pendientes de pago.</p>
+                    ) : (
+                      selectedAccount.sales.filter((l: any) => l.pending_balance > 0).map((lote: any) => (
+                        <div key={lote.id} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                          <div>
+                            <p className="font-black text-gray-800 font-mono text-xs">{lote.notes.replace('LOTE-VALORIZADO-', 'LOTE #')}</p>
+                            <p className="text-[10px] text-gray-400 font-semibold mt-0.5">Saldo pendiente: <strong className="text-red-600">S/ {parseFloat(lote.pending_balance).toFixed(2)}</strong> / Total original: S/ {parseFloat(lote.total_amount).toFixed(2)}</p>
+                          </div>
+                          <div className="flex gap-2 w-full sm:w-auto">
+                            <button
+                              type="button"
+                              onClick={() => generateDocumentReport(lote, "pdf")}
+                              className="flex-1 sm:flex-none bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1"
+                            >
+                              📄 Descargar PDF
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => generateDocumentReport(lote, "ticket")}
+                              className="flex-1 sm:flex-none bg-gray-900 hover:bg-black text-white font-bold py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1"
+                            >
+                              🖨️ Imprimir Ticket
+                            </button>
+                          </div>
                         </div>
                       ))
                     )}
                   </div>
-                </div>
-              )}
 
-              {/* VISTA 3: GENERAR PROFORMA PARA COBRADOR */}
-              {accountTab === "cobranza" && (
-                <div className="flex flex-col items-center p-8">
-                  <div className="bg-white w-full max-w-md border-2 border-dashed border-gray-300 p-6 rounded-xl shadow-inner font-mono text-sm">
-                    <h3 className="font-black text-lg mb-1 uppercase text-center text-gray-900">
-                      Proforma de Cob ro
-                    </h3>
-                    <p className="text-center font-bold text-gray-700">Cliente: {selectedAccount.name}</p>
-                    <p className="text-center text-xs text-gray-400">Fecha consulta: {new Date().toLocaleDateString()}</p>
-
-                    {/* 🟢 SECCIÓN DE DETALLE DE VALES Y ABONOS SIMPLIFICADOS Y LEGIBLES EN PANTALLA */}
-                    <div className="border-t border-b border-black my-4 py-3">
-                      <p className="font-bold text-xs mb-3 uppercase tracking-wider text-gray-500">Resumen de Movimientos:</p>
-                      <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
-                        {(!selectedAccount.history || selectedAccount.history.flatMap((d: any) => d.movements).length === 0) ? (
-                          <p className="text-gray-400 italic text-xs text-center">No hay detalles de movimientos.</p>
-                        ) : (
-                          selectedAccount.history.flatMap((day: any) =>
-                            day.movements.map((mov: any) => ({ ...mov, date: day.date }))
-                          ).map((mov: any, idx: number) => {
-                            const dDate = new Date(mov.date + "T00:00:00").toLocaleDateString("es-PE", { day: "numeric", month: "short" });
-                            return (
-                              <div key={idx} className="border-b border-gray-50 pb-2 last:border-none">
-                                <div className={`flex justify-between font-bold text-sm gap-4 ${mov.is_payment ? 'text-green-600' : 'text-gray-900'}`}>
-                                  <span>📅 {dDate} - {mov.is_payment ? `💰 ABONO (${mov.method || 'Efec.'})` : mov.description}</span>
-                                  <span className="shrink-0">{mov.is_payment ? '-' : ''} S/ {parseFloat(mov.amount).toFixed(2)}</span>
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="pb-2">
-                      <p className="flex justify-between font-black text-lg text-red-600">
-                        <span>TOTAL A PAGAR:</span>
-                        <span>
-                          S/ {parseFloat(selectedAccount.credit_balance).toFixed(2)}
-                        </span>
-                      </p>
-                    </div>
-                    <p className="text-[10px] text-gray-400 text-center mt-2 italic">
-                      Favor de cancelar o realizar abono vía Yape/Plin o Efectivo.
+                  {/* 🟢 SECCIÓN 2: DOCUMENTOS ARCHIVADOS (YA PAGADOS) */}
+                  <div className="space-y-3 pt-2">
+                    <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest border-b border-gray-200 pb-1">
+                      ✅ Historial de Lotes Cancelados (S/ 0.00):
                     </p>
+                    {!selectedAccount?.paid_lotes || selectedAccount.paid_lotes.length === 0 ? (
+                      <p className="text-gray-400 italic pl-2">No registra documentos cancelados en el histórico.</p>
+                    ) : (
+                      selectedAccount.paid_lotes.map((lote: any) => (
+                        <div key={lote.id} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                          <div>
+                            <p className="font-black text-gray-700 font-mono text-xs">{lote.notes.replace('LOTE-VALORIZADO-', 'LOTE #')}</p>
+                            <p className="text-[10px] text-gray-400 font-semibold mt-0.5">Total Liquidado: <strong className="text-emerald-600">S/ {parseFloat(lote.total_amount).toFixed(2)}</strong> — Concluido en {lote.days_to_pay} días.</p>
+                          </div>
+                          <div className="flex gap-2 w-full sm:w-auto">
+                            <button
+                              type="button"
+                              onClick={() => generateDocumentReport(lote, "pdf")}
+                              className="flex-1 sm:flex-none bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1"
+                            >
+                              📄 Descargar PDF
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => generateDocumentReport(lote, "ticket")}
+                              className="flex-1 sm:flex-none bg-gray-900 hover:bg-black text-white font-bold py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1"
+                            >
+                              🖨️ Re-Imprimir Ticket
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
 
-                  <div className="mt-8 flex flex-col sm:flex-row gap-4 w-full max-w-md justify-center">
-                    <button
-                      onClick={handlePrintProforma}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow transition-colors w-full"
-                    >
-                      🖨️ Imprimir Ticket (80mm)
-                    </button>
-
-                    <button
-                      onClick={handlePrintPDFReport}
-                      className="bg-green-600 hover:bg-green-700 text-white px-6 py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow transition-colors w-full"
-                    >
-                      📄 Generar PDF Detallado
-                    </button>
-                  </div>
                 </div>
               )}
-            </div>
-          </div>
-        </div>
+
+
+
+
+
+
+
+            </div >
+          </div >
+        </div >
       )}
-    </div>
+    </div >
   );
 }

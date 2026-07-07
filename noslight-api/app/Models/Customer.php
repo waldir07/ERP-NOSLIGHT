@@ -30,4 +30,14 @@ class Customer extends Model
     {
         return $this->hasMany(CreditPayment::class);
     }
+
+        /**
+     * 🟢 RELACIÓN CON LOS DOCUMENTOS DE COBRO UNIFICADOS (LOTES CERRADOS)
+     */
+    public function credits()
+    {
+        // Un cliente tiene muchos registros de deudas en la tabla credits
+        return $this->hasMany(Credit::class, 'customer_id');
+    }
+
 }

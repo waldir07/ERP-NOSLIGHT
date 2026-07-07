@@ -17,6 +17,8 @@ services:
             XDEBUG_MODE: '${SAIL_XDEBUG_MODE:-off}'
             XDEBUG_CONFIG: '${SAIL_XDEBUG_CONFIG:-client_host=host.docker.internal}'
             IGNITION_LOCAL_SITES_PATH: '${PWD}'
+            # 🟢 UNIFICACIÓN NATIVA: Forzamos la hora de Lima en el contenedor de PHP
+            TZ: 'America/Lima'
         volumes:
             - '.:/var/www/html'
         networks:
@@ -27,7 +29,6 @@ services:
             - mailpit
     mysql:
         image: 'mysql:8.4'
-        command: --default-time-zone='-05:00'
         ports:
             - '127.0.0.1:${FORWARD_DB_PORT:-3306}:3306'
         environment:
@@ -39,7 +40,6 @@ services:
             MYSQL_ALLOW_EMPTY_PASSWORD: 1
             MYSQL_EXTRA_OPTIONS: '${MYSQL_EXTRA_OPTIONS:-}'
             TZ: 'America/Lima'
-            MYSQL_INIT_COMMAND: "SET time_zone = '-05:00';"
         volumes:
             - 'sail-mysql:/var/lib/mysql'
             - './vendor/laravel/sail/database/mysql/create-testing-database.sh:/docker-entrypoint-initdb.d/10-create-testing-database.sh'
