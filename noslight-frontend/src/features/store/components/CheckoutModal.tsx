@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { X, Plus, Trash2, Wallet } from "lucide-react";
 
-
+import Swal from "sweetalert2";
 
 
 interface PaymentLine {
@@ -209,12 +209,16 @@ export default function CheckoutModal({
       saleType,
     );
 
-    // Validaciones
+    // ================================================================
+    // 1. VALIDACIONES PREVIAS (Con Swal)
+    // ================================================================
     if (saleType === "credito" && !selectedCustomerId) {
-      return alert(
-        "Debe seleccionar un cliente registrado para ventas a crédito.",
-      );
+      Swal.fire({ icon: 'warning', title: 'Faltan Datos', text: 'Debe seleccionar un cliente registrado para ventas a crédito.' });
+      return;
     }
+
+
+
 
     // ================================================================
     // 🛡️ CANDADO DE CRÉDITO (Inyectado aquí)
@@ -236,20 +240,49 @@ export default function CheckoutModal({
         const newBalance = currentBalance + totalAmount;
 
         if (newBalance > creditLimit) {
-          const proceed = window.confirm(`⚠️ ADVERTENCIA DE LÍMITE:\n\nEsta venta superará el límite de crédito del cliente.\nLímite permitido: S/ ${creditLimit.toFixed(2)}\nNuevo saldo proyectado: S/ ${newBalance.toFixed(2)}\n\n¿Deseas autorizar y guardar esta venta de todos modos?`);
+          const proceed = await Swal.fire({
+            title: '⚠️ Advertencia de Límite',
+            html: `Esta venta superará el límite de crédito del cliente.<br><br><b>Límite permitido:</b> S/ ${creditLimit.toFixed(2)}<br><b>Nuevo saldo proyectado:</b> S/ ${newBalance.toFixed(2)}<br><br>¿Deseas autorizar y guardar esta venta de todos modos?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#d33',
+            cancelButtonColor: '#3085d6',
+            confirmButtonText: 'Sí, autorizar venta',
+            cancelButtonText: 'Cancelar'
+          });
 
-          if (!proceed) {
-            return; // Aborta y detiene la venta si el cajero le da a "Cancelar"
-          }
+          if (!proceed.isConfirmed) return; // Se cancela la venta
         }
       }
     }
     // ================================================================
 
     if (saleType === "contado" && remaining > 0.01) {
-      return alert("Falta cubrir el monto total de la venta.");
+      Swal.fire({ icon: 'warning', title: 'Pago Incompleto', text: 'Falta cubrir el monto total de la venta.' });
+      return;
     }
 
+    // ================================================================
+    // 2. LA GRAN PREGUNTA FINAL: ¿ESTÁS SEGURO?
+    // ================================================================
+    const confirmSale = await Swal.fire({
+      title: '¿Procesar Venta?',
+      text: `Vas a registrar una venta por S/ ${totalAmount.toFixed(2)} al ${saleType.toUpperCase()}.`,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonColor: '#10B981', // Verde esmeralda
+      cancelButtonColor: '#6B7280', // Gris
+      confirmButtonText: shouldPrint ? 'Sí, cobrar e IMPRIMIR' : 'Sí, cobrar',
+      cancelButtonText: 'Revisar de nuevo',
+      reverseButtons: true // Pone el botón de confirmar a la derecha
+    });
+
+    // Si el usuario se arrepiente y presiona "Revisar de nuevo", abortamos
+    if (!confirmSale.isConfirmed) return;
+
+    // ================================================================
+    // 3. PROCESO DE VENTA (Solo si dijo que SÍ)
+    // ================================================================
     setIsSubmitting(true);
 
     try {
@@ -286,11 +319,11 @@ export default function CheckoutModal({
           console.log("ℹ️ No se abre gaveta (Es venta a crédito o pago electrónico)");
         }
 
-        onClose();
+
       }
     } catch (error) {
       console.error("❌ Error en handleConfirm:", error);
-      alert("Error al procesar la venta. Revisa la consola.");
+      Swal.fire({ icon: 'error', title: 'Error fatal', text: 'No se pudo procesar la venta. Revisa la consola.' });
     } finally {
       setIsSubmitting(false);
     }

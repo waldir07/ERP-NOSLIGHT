@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Search, ShoppingCart, Plus, Minus, Trash2, Tag } from "lucide-react";
 import CheckoutModal from "./CheckoutModal"; // O ajusta la ruta si lo guardaste en otra carpeta
+import Swal from "sweetalert2";
 
 // Tipos de datos blindados
 interface Product {
@@ -372,11 +373,10 @@ export default function NewSalePage() {
                       type="number"
                       min="0"
                       step="0.10"
-                      className={`w-20 text-right font-black text-lg border-b-2 focus:outline-none bg-transparent transition-colors ${
-                        item.unit_price === 0
-                          ? "text-red-500 border-red-300 focus:border-red-500 placeholder-red-300"
-                          : "text-gray-800 border-gray-200 focus:border-blue-500"
-                      }`}
+                      className={`w-20 text-right font-black text-lg border-b-2 focus:outline-none bg-transparent transition-colors ${item.unit_price === 0
+                        ? "text-red-500 border-red-300 focus:border-red-500 placeholder-red-300"
+                        : "text-gray-800 border-gray-200 focus:border-blue-500"
+                        }`}
                       value={item.unit_price === 0 ? "" : item.unit_price}
                       onChange={(e) => updatePrice(item.id, e.target.value)}
                       placeholder="0.00"
@@ -430,24 +430,40 @@ export default function NewSalePage() {
                 body: JSON.stringify(payload),
               });
               if (res.ok) {
-                alert("¡Venta registrada con éxito!");
+
+                Swal.fire({
+                  title: '¡Venta Registrada!',
+                  text: 'La transacción se procesó de forma exitosa.',
+                  icon: 'success',
+                  timer: 2000,
+                  showConfirmButton: false
+                });
+
                 setCart([]);
                 setIsCheckoutOpen(false);
                 fetchStock();
                 return true;
               } else {
                 const error = await res.json();
-                alert("Error al cobrar: " + (error.message || "Revisa el stock"));
+                Swal.fire({
+                  title: 'Error al cobrar',
+                  text: error.message || "Revisa el stock disponible.",
+                  icon: 'error'
+                });
                 return false;
               }
             } catch (err) {
-              alert("Error de conexión al servidor.");
+              Swal.fire({
+                title: 'Error de conexión',
+                text: 'No se pudo conectar con el servidor.',
+                icon: 'error'
+              });
               return false;
             }
           }}
         />
       )}
-      
+
     </div>
   );
 }
