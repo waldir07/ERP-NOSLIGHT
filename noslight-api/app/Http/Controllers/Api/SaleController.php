@@ -278,17 +278,13 @@ class SaleController extends Controller
         // Evitamos sumar las ventas de créditos del pasado que fueron pagadas hoy
         $grandTotal = $cashTotal + $electronicTotal;
 
-        // =========================================================================
         // 6. FILTRO DE VISTA INTELIGENTE
-        // =========================================================================
         if (!$request->filled('start_date') && !$request->filled('end_date')) {
             $todayStr = \Carbon\Carbon::now('America/Lima')->toDateString();
 
-            // Primero, contemos si hay ventas hoy
             $hayVentasHoy = \App\Models\Sale::whereDate('created_at', $todayStr)->exists();
             $hayPendientes = \App\Models\Sale::where('status', '!=', 'paid')->exists();
 
-            // Solo filtramos si realmente hay algo que mostrar hoy o créditos pendientes
             if ($hayVentasHoy || $hayPendientes) {
                 $query->where(function ($q) use ($todayStr) {
                     $q->whereDate('created_at', $todayStr)
@@ -297,26 +293,6 @@ class SaleController extends Controller
                         });
                 });
             }
-        }
-
-        // Auditoría de fechas existentes
-        $fechaMin = \App\Models\Sale::min('created_at');
-        $fechaMax = \App\Models\Sale::max('created_at');
-
-        Log::info("AUDITORÍA DE DATOS: Tus ventas están registradas desde el $fechaMin hasta el $fechaMax.");
-
-        // 🚨 AUDITORÍA SILENCIOSA PARA CONTABO (No interrumpe el flujo)
-        if (true) {
-            $sqlMode = DB::select("SELECT @@sql_mode as mode")[0]->mode ?? 'No se pudo leer';
-
-            Log::info('--- AUDITORÍA HISTORIAL DE VENTAS ---', [
-                'entorno'                     => config('app.env'),
-                'sql_mode_produccion'         => $sqlMode,
-                'sql_principal'               => $query->toSql(),
-                'bindings'                    => $query->getBindings(),
-                'cantidad_sin_paginar'        => $query->count(),
-                'ids_pagos_mixtos_detectados' => isset($salesIdsConEsePago) ? $salesIdsConEsePago : 'Filtro no ejecutado'
-            ]);
         }
 
         $paginatedSales = $query->orderBy('id', 'desc')->paginate(10);
