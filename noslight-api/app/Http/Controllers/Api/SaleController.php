@@ -295,6 +295,21 @@ class SaleController extends Controller
             });
         }
 
+        // 🚨 BLOQUE DE AUDITORÍA INTEGRAL PARA CONTABO
+        if (config('app.env') === 'production' || $request->has('debug_database') || true) {
+            // Consultamos el sql_mode nativo usando la conexión activa de Laravel
+            $sqlMode = DB::select("SELECT @@sql_mode as mode")[0]->mode ?? 'No se pudo leer';
+
+            return response()->json([
+                'entorno' => config('app.env'),
+                'sql_mode_produccion' => $sqlMode,
+                'sql_principal' => $query->toSql(),
+                'bindings' => $query->getBindings(),
+                'cantidad_sin_paginar' => $query->count(),
+                'ids_pagos_mixtos_detectados' => isset($salesIdsConEsePago) ? $salesIdsConEsePago : 'Filtro no ejecutado'
+            ]);
+        }
+
         $paginatedSales = $query->orderBy('id', 'desc')->paginate(10);
 
 
