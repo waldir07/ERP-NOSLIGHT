@@ -640,9 +640,11 @@ export const SalesHistoryPage = () => {
             onChange={(e) => { setSaleType(e.target.value); setPage(1); }}
             className="bg-gray-50 border rounded-lg px-3 py-1.5 text-sm font-medium text-gray-700 focus:outline-none"
           >
-            <option value="">Todas las condiciones</option>
-            <option value="contado">Al Contado</option>
-            <option value="credito">A Crédito</option>
+            <option value="">Todas las ventas</option>
+            <option value="credito">A Crédito (Por cobrar)</option>
+            <option value="efectivo">💵 Efectivo (Solo o Mixto)</option>
+            <option value="yape">📱 Yape / Plin (Solo o Mixto)</option>
+            <option value="transferencia">🏦 Transferencia (Solo o Mixto)</option>
           </select>
 
           <button

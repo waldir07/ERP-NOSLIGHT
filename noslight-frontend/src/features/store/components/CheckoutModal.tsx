@@ -265,16 +265,51 @@ export default function CheckoutModal({
     // ================================================================
     // 2. LA GRAN PREGUNTA FINAL: ¿ESTÁS SEGURO?
     // ================================================================
+
+    // Construimos el desglose visual de los pagos para la cajera
+    let paymentSummaryHtml = "";
+    if (saleType === "contado") {
+      // Filtramos solo los pagos mayores a 0 y armamos una lista bonita
+      paymentSummaryHtml = payments
+        .filter((p: any) => parseFloat(p.amount) > 0)
+        .map((p: any) => {
+          let icon = "💵";
+          if (p.method === "yape" || p.method === "plin") icon = "📱";
+          if (p.method === "transferencia") icon = "🏦";
+
+          // 🟢 NUEVO: Si no es efectivo, mostramos la cuenta destino en color azulito/morado
+          const destinoHtml = p.method !== "efectivo"
+            ? ` <span style="color: #4f46e5; font-size: 0.85em;">(${p.destination})</span>`
+            : '';
+
+          return `${icon} <b>${p.method.toUpperCase()}</b>${destinoHtml}: S/ ${parseFloat(p.amount).toFixed(2)}`;
+        })
+        .join('<br>');
+    } else {
+      paymentSummaryHtml = `💳 <b>A CRÉDITO</b> (Se sumará a la cuenta del cliente)`;
+    }
+
     const confirmSale = await Swal.fire({
       title: '¿Procesar Venta?',
-      text: `Vas a registrar una venta por S/ ${totalAmount.toFixed(2)} al ${saleType.toUpperCase()}.`,
+      html: `
+      <div style="text-align: center; font-size: 1.1rem;">
+        Vas a registrar una venta por <b style="color: #059669; font-size: 1.3rem;">S/ ${totalAmount.toFixed(2)}</b>.
+        <br><br>
+        <div style="background-color: #f3f4f6; padding: 15px; border-radius: 10px; display: inline-block; text-align: left;">
+          <p style="margin: 0 0 10px 0; color: #4b5563; font-size: 0.9rem; font-weight: bold; text-transform: uppercase;">MÉTODO DE COBRO RECOLECTADO:</p>
+          ${paymentSummaryHtml}
+        </div>
+        <br><br>
+        ¿Confirmas que el método de cobro es correcto?
+      </div>
+    `,
       icon: 'question',
       showCancelButton: true,
-      confirmButtonColor: '#10B981', // Verde esmeralda
-      cancelButtonColor: '#6B7280', // Gris
+      confirmButtonColor: '#10B981',
+      cancelButtonColor: '#6B7280',
       confirmButtonText: shouldPrint ? 'Sí, cobrar e IMPRIMIR' : 'Sí, cobrar',
       cancelButtonText: 'Revisar de nuevo',
-      reverseButtons: true // Pone el botón de confirmar a la derecha
+      reverseButtons: true
     });
 
     // Si el usuario se arrepiente y presiona "Revisar de nuevo", abortamos

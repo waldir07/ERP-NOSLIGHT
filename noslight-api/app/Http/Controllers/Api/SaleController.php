@@ -194,7 +194,22 @@ class SaleController extends Controller
             $query->whereBetween('created_at', [$request->start_date . ' 00:00:00', $request->end_date . ' 23:59:59']);
         }
         if ($request->filled('sale_type')) {
-            $query->where($columnaTipo, $request->sale_type === 'credito' ? '!=' : '=', 'paid');
+            $tipo = $request->sale_type;
+
+            if ($tipo === 'credito') {
+                // Filtro para Créditos (Pendientes de pago)
+                $query->where($columnaTipo, '!=', 'paid');
+            } elseif ($tipo === 'contado') {
+                // Filtro para ventas al contado general (Por compatibilidad)
+                $query->where($columnaTipo, '=', 'paid');
+            } else {
+                // 🔥 LA MAGIA DE LOS PAGOS MIXTOS (Efectivo, Yape, Transferencia)
+                // Buscamos ventas pagadas que tengan AL MENOS UN PAGO con el método seleccionado
+                $query->where($columnaTipo, '=', 'paid')
+                      ->whereHas('payments', function ($q) use ($tipo) {
+                          $q->where('payment_method', 'LIKE', '%' . $tipo . '%');
+                      });
+            }
         }
         if ($request->filled('brand')) {
             $brand = $request->brand;
