@@ -196,20 +196,20 @@ class SaleController extends Controller
         if ($request->filled('sale_type')) {
             $tipo = $request->sale_type;
 
-            if ($tipo === 'credito') {
-                // Filtro para Créditos (Pendientes de pago)
-                $query->where($columnaTipo, '!=', 'paid');
-            } elseif ($tipo === 'contado') {
-                // Filtro para ventas al contado general (Por compatibilidad)
-                $query->where($columnaTipo, '=', 'paid');
-            } else {
-                // 🔥 LA MAGIA DE LOS PAGOS MIXTOS (Efectivo, Yape, Transferencia)
-                // Buscamos ventas pagadas que tengan AL MENOS UN PAGO con el método seleccionado
-                $query->where($columnaTipo, '=', 'paid')
-                      ->whereHas('payments', function ($q) use ($tipo) {
-                          $q->where('payment_method', 'LIKE', '%' . $tipo . '%');
-                      });
-            }
+            // Envolvemos todo en una subconsulta para no romper la lógica de fechas inferior
+            $query->where(function ($subQuery) use ($tipo, $columnaTipo) {
+                if ($tipo === 'credito') {
+                    $subQuery->where($columnaTipo, '!=', 'paid');
+                } elseif ($tipo === 'contado') {
+                    $subQuery->where($columnaTipo, '=', 'paid');
+                } else {
+                    // Pagos mixtos agrupados de forma segura
+                    $subQuery->where($columnaTipo, '=', 'paid')
+                             ->whereHas('payments', function ($q) use ($tipo) {
+                                 $q->where('payment_method', 'LIKE', '%' . $tipo . '%');
+                             });
+                }
+            });
         }
         if ($request->filled('brand')) {
             $brand = $request->brand;
