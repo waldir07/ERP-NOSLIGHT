@@ -290,14 +290,20 @@ class SaleController extends Controller
 
             // Solo filtramos si realmente hay algo que mostrar hoy o créditos pendientes
             if ($hayVentasHoy || $hayPendientes) {
-                $query->where(function($q) use ($todayStr) {
+                $query->where(function ($q) use ($todayStr) {
                     $q->whereDate('created_at', $todayStr)
-                      ->orWhere(function($sub) {
-                          $sub->where('status', '!=', 'paid');
-                      });
+                        ->orWhere(function ($sub) {
+                            $sub->where('status', '!=', 'paid');
+                        });
                 });
             }
         }
+
+        // Auditoría de fechas existentes
+        $fechaMin = \App\Models\Sale::min('created_at');
+        $fechaMax = \App\Models\Sale::max('created_at');
+
+        Log::info("AUDITORÍA DE DATOS: Tus ventas están registradas desde el $fechaMin hasta el $fechaMax.");
 
         // 🚨 AUDITORÍA SILENCIOSA PARA CONTABO (No interrumpe el flujo)
         if (true) {
