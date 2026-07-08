@@ -190,27 +190,30 @@ class SaleController extends Controller
                     });
             });
         }
+
         if ($request->filled('start_date') && $request->filled('end_date')) {
             $query->whereBetween('created_at', [$request->start_date . ' 00:00:00', $request->end_date . ' 23:59:59']);
         }
+
+        // 🎯 FILTRO DE TIPOS Y PAGOS MIXTOS ULTRA-SEGURO
         if ($request->filled('sale_type')) {
             $tipo = $request->sale_type;
 
-            // Envolvemos todo en una subconsulta para no romper la lógica de fechas inferior
-            $query->where(function ($subQuery) use ($tipo, $columnaTipo) {
-                if ($tipo === 'credito') {
-                    $subQuery->where($columnaTipo, '!=', 'paid');
-                } elseif ($tipo === 'contado') {
-                    $subQuery->where($columnaTipo, '=', 'paid');
-                } else {
-                    // Pagos mixtos agrupados de forma segura
-                    $subQuery->where($columnaTipo, '=', 'paid')
-                             ->whereHas('payments', function ($q) use ($tipo) {
-                                 $q->where('payment_method', 'LIKE', '%' . $tipo . '%');
-                             });
-                }
-            });
+            if ($tipo === 'credito') {
+                $query->where($columnaTipo, '!=', 'paid');
+            } elseif ($tipo === 'contado') {
+                $query->where($columnaTipo, '=', 'paid');
+            } else {
+                // Sacamos los IDs en una consulta plana y simple aislada (Evita conflictos de sintaxis en producción)
+                $salesIdsConEsePago = \App\Models\SalePayment::where('payment_method', 'LIKE', '%' . $tipo . '%')
+                    ->pluck('sale_id')
+                    ->toArray();
+
+                $query->where($columnaTipo, '=', 'paid')
+                    ->whereIn('id', $salesIdsConEsePago);
+            }
         }
+
         if ($request->filled('brand')) {
             $brand = $request->brand;
             $query->whereHas('items.productVariant.product', function ($q) use ($brand, $columnaMarca) {
@@ -236,7 +239,7 @@ class SaleController extends Controller
             });
         }
 
-                // =========================================================================
+        // =========================================================================
         // 🟢 NUEVOS KPIs PURIFICADOS (Alineados con tu visión de negocio)
         // =========================================================================
         $clonedQuery = clone $query;
@@ -279,11 +282,11 @@ class SaleController extends Controller
         // 🔥 DEFINIMOS LA VARIABLE QUE FALTABA:
         $todayStr = \Carbon\Carbon::now('America/Lima')->toDateString();
 
-        $query->where(function($q) use ($todayStr) {
+        $query->where(function ($q) use ($todayStr) {
             $q->whereDate('created_at', $todayStr)
-              ->orWhere(function($sub) {
-                  $sub->where('status', '!=', 'paid');
-              });
+                ->orWhere(function ($sub) {
+                    $sub->where('status', '!=', 'paid');
+                });
         });
 
         $paginatedSales = $query->orderBy('id', 'desc')->paginate(10);
