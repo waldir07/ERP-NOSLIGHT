@@ -172,7 +172,7 @@ class SaleController extends Controller
     public function index(\Illuminate\Http\Request $request)
     {
 
-        $columnaMarca     = 'brand';
+       $columnaMarca     = 'brand';
         $columnaModelo    = 'model';
         $columnaAmperaje  = 'amperage';
         $columnaPolaridad = 'poles';
@@ -195,7 +195,7 @@ class SaleController extends Controller
             $query->whereBetween('created_at', [$request->start_date . ' 00:00:00', $request->end_date . ' 23:59:59']);
         }
 
-        // 🎯 FILTRO DE TIPOS Y PAGOS MIXTOS ULTRA-SEGURO
+        // 🎯 FILTRO DE TIPOS Y PAGOS MIXTOS ULTRA-SEGURO (Limpio y directo)
         if ($request->filled('sale_type')) {
             $tipo = $request->sale_type;
 
@@ -204,13 +204,13 @@ class SaleController extends Controller
             } elseif ($tipo === 'contado') {
                 $query->where($columnaTipo, '=', 'paid');
             } else {
-                // Sacamos los IDs en una consulta plana y simple aislada (Evita conflictos de sintaxis en producción)
+                // Buscamos los IDs de forma totalmente aislada para no alterar la consulta estructural de la tabla
                 $salesIdsConEsePago = \App\Models\SalePayment::where('payment_method', 'LIKE', '%' . $tipo . '%')
                     ->pluck('sale_id')
                     ->toArray();
 
                 $query->where($columnaTipo, '=', 'paid')
-                    ->whereIn('id', $salesIdsConEsePago);
+                      ->whereIn('id', $salesIdsConEsePago);
             }
         }
 
@@ -238,7 +238,6 @@ class SaleController extends Controller
                 $q->where($columnaPolaridad, 'like', '%' . $polarity . '%');
             });
         }
-
         // =========================================================================
         // 🟢 NUEVOS KPIs PURIFICADOS (Alineados con tu visión de negocio)
         // =========================================================================
@@ -278,16 +277,23 @@ class SaleController extends Controller
         // Evitamos sumar las ventas de créditos del pasado que fueron pagadas hoy
         $grandTotal = $cashTotal + $electronicTotal;
 
+        // =========================================================================
         // 6. FILTRO DE VISTA: Ocultamos del listado diario las ventas antiguas que se pagaron hoy por lote
-        // 🔥 DEFINIMOS LA VARIABLE QUE FALTABA:
-        $todayStr = \Carbon\Carbon::now('America/Lima')->toDateString();
+        // =========================================================================
 
-        $query->where(function ($q) use ($todayStr) {
-            $q->whereDate('created_at', $todayStr)
-                ->orWhere(function ($sub) {
-                    $sub->where('status', '!=', 'paid');
-                });
-        });
+        // Solo restringimos la vista si la cajera NO ha seleccionado fechas manualmente
+        if (!$request->filled('start_date') && !$request->filled('end_date')) {
+
+            // 🟢 SOLUCIÓN AUDITADA: Forzamos a Carbon a sacar la fecha real de Perú
+            $todayStr = \Carbon\Carbon::now('America/Lima')->toDateString();
+
+            $query->where(function($q) use ($todayStr) {
+                $q->whereDate('created_at', $todayStr)
+                  ->orWhere(function($sub) {
+                      $sub->where('status', '!=', 'paid');
+                  });
+            });
+        }
 
         $paginatedSales = $query->orderBy('id', 'desc')->paginate(10);
 
