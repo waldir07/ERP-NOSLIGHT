@@ -15,6 +15,7 @@ use App\Models\ProductVariant;
 use App\Models\Customer;
 use App\Models\SaleItem;
 use App\Models\SalePayment;
+use Illuminate\Support\Facades\Log;
 
 class SaleController extends Controller
 {
@@ -172,7 +173,7 @@ class SaleController extends Controller
     public function index(\Illuminate\Http\Request $request)
     {
 
-       $columnaMarca     = 'brand';
+        $columnaMarca     = 'brand';
         $columnaModelo    = 'model';
         $columnaAmperaje  = 'amperage';
         $columnaPolaridad = 'poles';
@@ -210,7 +211,7 @@ class SaleController extends Controller
                     ->toArray();
 
                 $query->where($columnaTipo, '=', 'paid')
-                      ->whereIn('id', $salesIdsConEsePago);
+                    ->whereIn('id', $salesIdsConEsePago);
             }
         }
 
@@ -287,25 +288,24 @@ class SaleController extends Controller
             // 🟢 SOLUCIÓN AUDITADA: Forzamos a Carbon a sacar la fecha real de Perú
             $todayStr = \Carbon\Carbon::now('America/Lima')->toDateString();
 
-            $query->where(function($q) use ($todayStr) {
+            $query->where(function ($q) use ($todayStr) {
                 $q->whereDate('created_at', $todayStr)
-                  ->orWhere(function($sub) {
-                      $sub->where('status', '!=', 'paid');
-                  });
+                    ->orWhere(function ($sub) {
+                        $sub->where('status', '!=', 'paid');
+                    });
             });
         }
 
-        // 🚨 BLOQUE DE AUDITORÍA INTEGRAL PARA CONTABO
-        if (config('app.env') === 'production' || $request->has('debug_database') || true) {
-            // Consultamos el sql_mode nativo usando la conexión activa de Laravel
+        // 🚨 AUDITORÍA SILENCIOSA PARA CONTABO (No interrumpe el flujo)
+        if (true) {
             $sqlMode = DB::select("SELECT @@sql_mode as mode")[0]->mode ?? 'No se pudo leer';
 
-            return response()->json([
-                'entorno' => config('app.env'),
-                'sql_mode_produccion' => $sqlMode,
-                'sql_principal' => $query->toSql(),
-                'bindings' => $query->getBindings(),
-                'cantidad_sin_paginar' => $query->count(),
+            Log::info('--- AUDITORÍA HISTORIAL DE VENTAS ---', [
+                'entorno'                     => config('app.env'),
+                'sql_mode_produccion'         => $sqlMode,
+                'sql_principal'               => $query->toSql(),
+                'bindings'                    => $query->getBindings(),
+                'cantidad_sin_paginar'        => $query->count(),
                 'ids_pagos_mixtos_detectados' => isset($salesIdsConEsePago) ? $salesIdsConEsePago : 'Filtro no ejecutado'
             ]);
         }
