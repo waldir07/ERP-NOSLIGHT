@@ -279,21 +279,24 @@ class SaleController extends Controller
         $grandTotal = $cashTotal + $electronicTotal;
 
         // =========================================================================
-        // 6. FILTRO DE VISTA: Ocultamos del listado diario las ventas antiguas que se pagaron hoy por lote
+        // 6. FILTRO DE VISTA INTELIGENTE
         // =========================================================================
-
-        // Solo restringimos la vista si la cajera NO ha seleccionado fechas manualmente
         if (!$request->filled('start_date') && !$request->filled('end_date')) {
-
-            // 🟢 SOLUCIÓN AUDITADA: Forzamos a Carbon a sacar la fecha real de Perú
             $todayStr = \Carbon\Carbon::now('America/Lima')->toDateString();
 
-            $query->where(function ($q) use ($todayStr) {
-                $q->whereDate('created_at', $todayStr)
-                    ->orWhere(function ($sub) {
-                        $sub->where('status', '!=', 'paid');
-                    });
-            });
+            // Primero, contemos si hay ventas hoy
+            $hayVentasHoy = \App\Models\Sale::whereDate('created_at', $todayStr)->exists();
+            $hayPendientes = \App\Models\Sale::where('status', '!=', 'paid')->exists();
+
+            // Solo filtramos si realmente hay algo que mostrar hoy o créditos pendientes
+            if ($hayVentasHoy || $hayPendientes) {
+                $query->where(function($q) use ($todayStr) {
+                    $q->whereDate('created_at', $todayStr)
+                      ->orWhere(function($sub) {
+                          $sub->where('status', '!=', 'paid');
+                      });
+                });
+            }
         }
 
         // 🚨 AUDITORÍA SILENCIOSA PARA CONTABO (No interrumpe el flujo)
