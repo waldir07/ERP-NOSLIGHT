@@ -8,6 +8,7 @@ import { ToastProvider } from "./components/ToastProvider";
 import { Toaster } from "react-hot-toast";
 
 
+
 const queryClient = new QueryClient();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

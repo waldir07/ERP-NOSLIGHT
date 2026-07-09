@@ -1,5 +1,8 @@
 /* src/index.css */
 @import "tailwindcss";
-
+/* En tu index.css, agrega esta clase para usarla en el HTML */
+.truck-moving {
+  animation: truck-run 2s linear infinite;
+}
 /* Puedes agregar tus estilos custom después si quieres */
 

@@ -1,5 +1,7 @@
 // src/features/store/components/StoreDashboard.tsx
 import { ShoppingBag, ArrowDownCircle, Package } from "lucide-react";
+import { StockSlider } from "./StockSlider"; // 👈 1. Importamos el Lëgo
+
 
 export default function StoreDashboard() {
   const stats = [
@@ -16,6 +18,9 @@ export default function StoreDashboard() {
         </h1>
         <p className="text-gray-500 font-bold uppercase text-[10px] tracking-[2px]">Resumen de operaciones</p>
       </div>
+
+      {/* 👈 2. INYECTAMOS EL COMPONENTE AQUÍ */}
+      <StockSlider />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {stats.map((stat, i) => (
