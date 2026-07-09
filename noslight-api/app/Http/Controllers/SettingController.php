@@ -17,22 +17,12 @@ class SettingController extends Controller
     // 2. Recibir y guardar configuraciones desde React (Actualizado para Arrays/Objetos)
     public function store(Request $request)
     {
-        // Recorremos todo lo que envíe React
         foreach ($request->all() as $key => $value) {
-
-            // 🔥 TRUCO TÉCNICO: Si el valor es un array (como bank_accounts, yape_accounts o admin_announcements),
-            // lo transformamos a texto plano usando json_encode para que tu tabla Clave-Valor lo guarde sin errores.
-            if (is_array($value)) {
-                $value = json_encode($value);
-            }
-
             Setting::updateOrCreate(
                 ['key' => $key],
                 ['value' => $value]
             );
         }
-
         return response()->json(['message' => 'Configuración guardada correctamente']);
     }
-
 }
