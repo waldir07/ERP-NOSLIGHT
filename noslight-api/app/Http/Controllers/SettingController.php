@@ -22,6 +22,7 @@ class SettingController extends Controller
                 ['key' => $key],
                 ['value' => $value]
             );
+
         }
         return response()->json(['message' => 'Configuración guardada correctamente']);
     }

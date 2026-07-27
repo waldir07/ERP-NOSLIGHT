@@ -1179,7 +1179,176 @@ export default function CreditsPage() {
   };
 
 
-  // 🟢 MOTOR DE IMPRESIÓN DOCUMENTAL (Descarga Directa de PDF A4 y Ticket 80mm en Caliente)
+  /* // 🟢 MOTOR DE IMPRESIÓN DOCUMENTAL (Descarga Directa de PDF A4 y Ticket 80mm en Caliente)
+   const generateDocumentReport = (lote: any, format: "pdf" | "ticket") => {
+     const companyName = "Sistema junsu/kyf/noslight/jp.";
+     const clientName = selectedAccount?.name || "Cliente General";
+     const loteCode = lote.notes.replace('LOTE-VALORIZADO-', 'LOTE #');
+     const dateString = new Date(lote.created_at).toLocaleDateString("es-PE");
+     const cleanItems = lote.items?.filter((it: any) => it.quantity > 0) || [];
+     const paymentsList = lote.payments || [];
+     const isPaid = lote.pending_balance <= 0;
+ 
+     // 📄 CASO A: DESCARGA AUTOMÁTICA DE PDF PURO EN UN SOLO CLIC (Para Mandar por WhatsApp)
+     if (format === "pdf") {
+       try {
+         // Inicializamos la librería nativa jsPDF que ya tiene tu archivo
+         // 🟢 LLAMADO DIRECTO: Usa la instancia importada arriba de forma nativa
+         const doc = new jsPDF();
+ 
+ 
+         // Función interna para dibujar el encabezado en la página 1 o páginas siguientes
+ 
+ 
+         // Diseñamos el encabezado corporativo elegante
+         doc.setFont("Helvetica", "bold");
+         doc.setFontSize(20);
+         doc.text(companyName, 20, 20);
+         doc.setTextColor(30, 41, 59);
+         doc.setFontSize(10);
+         doc.setFont("Helvetica", "normal");
+         doc.text("Control Interno de Créditos y Cobranzas", 20, 26);
+ 
+         // Caja de Estado del Lote
+ 
+         doc.setFillColor(isPaid ? 209 : 254, isPaid ? 250 : 226, isPaid ? 229 : 226);
+         doc.rect(140, 13, 50, 14, "F");
+         doc.setFont("Helvetica", "bold");
+         doc.setFontSize(9);
+         doc.setTextColor(30, 41, 59);
+         doc.text(isPaid ? "TOTALMENTE PAGADO" : "CUENTA PENDIENTE", 143, 21);
+ 
+ 
+ 
+ 
+         // Tabla de Datos del Cliente
+         doc.setDrawColor(226, 232, 240);
+         doc.setFillColor(248, 250, 252);
+         doc.rect(20, 35, 170, 18, "FD");
+ 
+         doc.setFont("Helvetica", "bold");
+         doc.setFontSize(9);
+         doc.text("CLIENTE:", 25, 42); doc.setFont("Helvetica", "normal"); doc.text(clientName.toUpperCase(), 45, 42);
+         doc.setFont("Helvetica", "bold");
+         doc.text("DOCUMENTO:", 25, 48); doc.setFont("Helvetica", "normal"); doc.text(loteCode, 52, 48);
+         doc.setFont("Helvetica", "bold");
+         doc.text("FECHA:", 130, 42); doc.setFont("Helvetica", "normal"); doc.text(dateString, 150, 42);
+ 
+         // 📦 TITULO: MERCADERÍA DESPACHADA
+         doc.setFont("Helvetica", "bold");
+         doc.setFontSize(11);
+         doc.text("DESGLOSE DE MERCADERÍA DESPACHADA A CRÉDITO", 20, 63);
+ 
+         let currentY = 70;
+         doc.setFillColor(243, 244, 246);
+         doc.rect(20, currentY, 170, 8, "F");
+         doc.setFontSize(9);
+         doc.text("Cant.", 23, currentY + 6);
+         doc.text("Descripción del Producto", 45, currentY + 6);
+         doc.text("P. Unit.", 135, currentY + 6);
+         doc.text("Subtotal", 170, currentY + 6);
+ 
+         currentY += 8;
+ 
+ 
+         // 🟢 FORMATEO INDESTRUCIBLE: Soporte multi-línea automático para descripciones ultra-largas
+         cleanItems.forEach((it: any) => {
+           const fDespacho = it.fecha_despacho || dateString;
+           const pName = it.product_variant?.product?.name || "Artículo";
+           const total = (it.quantity * parseFloat(it.unit_price)).toFixed(2);
+ 
+           // Cantidad (Cant.) en su lugar fijo
+           doc.setFont("Helvetica", "normal");
+           doc.setFontSize(9);
+           doc.text(`${it.quantity}`, 23, currentY + 6);
+ 
+           // 🛡️ ESCUDO ANTI-DESBORDES: Corta el texto automáticamente si supera los 95mm de ancho
+           doc.setFont("Helvetica", "bold");
+           const splitName = doc.splitTextToSize(pName, 95);
+           doc.text(splitName, 32, currentY + 6);
+ 
+           // Calculamos cuántas líneas ocupó el nombre largo para empujar la fecha de despacho de forma dinámica
+           const linesOccupied = splitName.length;
+           const dateYOffset = 6 + (linesOccupied * 4.5); // Da un salto proporcional limpio hacia abajo
+ 
+           // Pintamos la fecha y hora calculando el desfase vertical dinámico
+           doc.setFont("Helvetica", "italic");
+           doc.setFontSize(8);
+           doc.setTextColor(100, 116, 139); // Gris contable
+           doc.text(`Despachado el: ${fDespacho} hrs`, 32, currentY + dateYOffset);
+ 
+           // Pintamos los montos de la derecha en sus coordenadas seguras fijas
+           doc.setFont("Helvetica", "normal");
+           doc.setFontSize(9);
+           doc.setTextColor(51, 51, 51);
+           doc.text(`S/ ${parseFloat(it.unit_price).toFixed(2)}`, 135, currentY + 6);
+           doc.text(`S/ ${total}`, 170, currentY + 6);
+ 
+           // Incrementamos el eje Y sumando el espacio dinámico que ocuparon las líneas del texto largo
+           currentY += dateYOffset + 6;
+         });
+ 
+ 
+ 
+         // 💰 TITULO: HISTORIAL DE COBRANZA
+         currentY += 10;
+         doc.setFont("Helvetica", "bold");
+         doc.setFontSize(11);
+         doc.text("HISTORIAL CRONOLÓGICO DE RECAUDACIÓN EN CAJA", 20, currentY);
+         currentY += 6;
+ 
+         if (paymentsList.length > 0) {
+           paymentsList.forEach((p: any) => {
+             const pDate = new Date(p.full_date || p.created_at).toLocaleDateString("es-PE");
+             doc.setFillColor(249, 250, 251);
+             doc.rect(20, currentY, 170, 8, "F");
+             doc.setFont("Helvetica", "normal");
+             doc.setFontSize(9);
+ 
+             // 🟢 INYECCIÓN DEL MÉTODO DE PAGO: Jalamos la propiedad p.method de forma limpia
+             const paymentMethodText = p.method ? `[${p.method}]` : '';
+             doc.text(`Abono realizado el ${pDate} a las ${p.time || 'hrs'} hrs mediante ${paymentMethodText} — `, 23, currentY + 6);
+ 
+             doc.setFont("Helvetica", "bold");
+             doc.text(`+ S/ ${parseFloat(p.amount).toFixed(2)}`, 170, currentY + 6);
+             currentY += 8;
+           });
+         } else {
+ 
+           doc.setFont("Helvetica", "italic");
+           doc.text("No se registran abonos parciales realizados a este lote.", 25, currentY + 6);
+           currentY += 8;
+         }
+ 
+         // Bloque de Totales Finales Cuadrados abajo a la derecha
+         currentY += 10;
+         doc.setFillColor(249, 250, 251);
+         doc.rect(120, currentY, 70, 24, "F");
+         doc.setFont("Helvetica", "normal");
+         doc.text("TOTAL VALORIZADO:", 123, currentY + 6); doc.text(`S/ ${parseFloat(lote.total_amount).toFixed(2)}`, 170, currentY + 6);
+         doc.text("TOTAL AMORTIZADO:", 123, currentY + 12); doc.text(`S/ ${parseFloat(lote.paid_amount).toFixed(2)}`, 170, currentY + 12);
+         doc.setDrawColor(200, 200, 200);
+         doc.line(123, currentY + 15, 187, currentY + 15);
+         doc.setFont("Helvetica", "bold");
+         doc.text("SALDO DEUDA:", 123, currentY + 21); doc.text(`S/ ${parseFloat(lote.pending_balance).toFixed(2)}`, 170, currentY + 21);
+ 
+         // 🔥 LA MAGIA DE LA DESCARGA INSTANTÁNEA:
+         // El navegador descarga el archivo de forma directa sin abrir pestañas feas
+         const cleanFileName = `ESTADO_CUENTA_${clientName.replace(/\s+/g, '_')}_${lote.notes}.pdf`;
+         doc.save(cleanFileName);
+ 
+       } catch (error) {
+         console.error("Error generando el PDF directo", error);
+         alert("Ocurrió un inconveniente técnico al armar el PDF. Por favor verifica las importaciones.");
+       }
+       return;
+     }
+ 
+     */
+
+
+  //para analizar si funciona:*/
+
   const generateDocumentReport = (lote: any, format: "pdf" | "ticket") => {
     const companyName = "Sistema junsu/kyf/noslight/jp.";
     const clientName = selectedAccount?.name || "Cliente General";
@@ -1187,151 +1356,209 @@ export default function CreditsPage() {
     const dateString = new Date(lote.created_at).toLocaleDateString("es-PE");
     const cleanItems = lote.items?.filter((it: any) => it.quantity > 0) || [];
     const paymentsList = lote.payments || [];
+    const isPaid = lote.pending_balance <= 0;
 
-    // 📄 CASO A: DESCARGA AUTOMÁTICA DE PDF PURO EN UN SOLO CLIC (Para Mandar por WhatsApp)
     if (format === "pdf") {
       try {
-        // Inicializamos la librería nativa jsPDF que ya tiene tu archivo
-        // 🟢 LLAMADO DIRECTO: Usa la instancia importada arriba de forma nativa
         const doc = new jsPDF();
+        let pageCount = 1; // Contador interno de páginas
 
-        // Diseñamos el encabezado corporativo elegante
-        doc.setFont("Helvetica", "bold");
-        doc.setFontSize(20);
-        doc.text(companyName, 20, 20);
+        // 🏢 ENCABEZADO PRINCIPAL (Solo para la Página 1)
+        const drawMainHeader = () => {
+          doc.setFont("Helvetica", "bold");
+          doc.setFontSize(20);
+          doc.setTextColor(30, 41, 59);
+          doc.text(companyName, 20, 20);
+          doc.setFontSize(10);
+          doc.setFont("Helvetica", "normal");
+          doc.text("Control Interno de Créditos y Cobranzas", 20, 26);
 
-        doc.setFontSize(10);
-        doc.setFont("Helvetica", "normal");
-        doc.text("Control Interno de Créditos y Cobranzas", 20, 26);
+          // Caja de Estado del Lote
+          doc.setFillColor(isPaid ? 209 : 254, isPaid ? 250 : 226, isPaid ? 229 : 226);
+          doc.rect(140, 13, 50, 14, "F");
+          doc.setFont("Helvetica", "bold");
+          doc.setFontSize(9);
+          doc.setTextColor(30, 41, 59);
+          doc.text(isPaid ? "TOTALMENTE PAGADO" : "CUENTA PENDIENTE", 143, 22);
+        };
 
-        // Caja de Estado del Lote
-        const isPaid = lote.pending_balance <= 0;
-        doc.setFillColor(isPaid ? 209 : 254, isPaid ? 250 : 226, isPaid ? 229 : 226);
-        doc.rect(140, 13, 50, 14, "F");
-        doc.setFont("Helvetica", "bold");
-        doc.setFontSize(9);
-        doc.text(isPaid ? "TOTALMENTE PAGADO" : "CUENTA PENDIENTE", 143, 21);
+        // 🍃 ENCABEZADO SUTIL (Para la Página 2 en adelante)
+        const drawSubsequentHeader = () => {
+          pageCount++;
+          doc.setFont("Helvetica", "normal");
+          doc.setFontSize(8);
+          doc.setTextColor(148, 163, 184); // Gris muy claro/sutil
 
-        // Tabla de Datos del Cliente
+          // Texto en línea: Código del documento y número de página
+          doc.text(`Continuación ${loteCode} — Cliente: ${clientName.toUpperCase()}`, 20, 15);
+          doc.text(`Pág. ${pageCount}`, 190, 15, { align: "right" });
+
+          // Línea divisoria muy fina
+          doc.setDrawColor(241, 245, 249);
+          doc.setLineWidth(0.2);
+          doc.line(20, 18, 190, 18);
+        };
+
+        // Cabecera común para la grilla de productos
+        const drawTableTh = (y: number) => {
+          doc.setFillColor(243, 244, 246);
+          doc.rect(20, y, 170, 8, "F");
+          doc.setFont("Helvetica", "bold");
+          doc.setFontSize(9);
+          doc.setTextColor(51, 51, 51);
+          doc.text("Cant.", 23, y + 6);
+          doc.text("Descripción del Producto", 45, y + 6);
+          doc.text("P. Unit.", 135, y + 6);
+          doc.text("Subtotal", 170, y + 6);
+        };
+
+        // Renderizar el inicio del documento (Página 1)
+        drawMainHeader();
+
+        // Tabla de Datos del Cliente (Página 1)
         doc.setDrawColor(226, 232, 240);
         doc.setFillColor(248, 250, 252);
         doc.rect(20, 35, 170, 18, "FD");
-
         doc.setFont("Helvetica", "bold");
+        doc.setFontSize(9);
+        doc.setTextColor(30, 41, 59);
         doc.text("CLIENTE:", 25, 42); doc.setFont("Helvetica", "normal"); doc.text(clientName.toUpperCase(), 45, 42);
         doc.setFont("Helvetica", "bold");
         doc.text("DOCUMENTO:", 25, 48); doc.setFont("Helvetica", "normal"); doc.text(loteCode, 52, 48);
         doc.setFont("Helvetica", "bold");
         doc.text("FECHA:", 130, 42); doc.setFont("Helvetica", "normal"); doc.text(dateString, 150, 42);
 
-        // 📦 TITULO: MERCADERÍA DESPACHADA
         doc.setFont("Helvetica", "bold");
         doc.setFontSize(11);
         doc.text("DESGLOSE DE MERCADERÍA DESPACHADA A CRÉDITO", 20, 63);
 
         let currentY = 70;
-        doc.setFillColor(243, 244, 246);
-        doc.rect(20, currentY, 170, 8, "F");
-        doc.setFontSize(9);
-        doc.text("Cant.", 23, currentY + 6);
-        doc.text("Descripción del Producto", 45, currentY + 6);
-        doc.text("P. Unit.", 135, currentY + 6);
-        doc.text("Subtotal", 170, currentY + 6);
+        drawTableTh(currentY);
         currentY += 8;
 
-
-        // 🟢 FORMATEO INDESTRUCIBLE: Soporte multi-línea automático para descripciones ultra-largas
+        // Iteración de productos con salto controlado
         cleanItems.forEach((it: any) => {
           const fDespacho = it.fecha_despacho || dateString;
           const pName = it.product_variant?.product?.name || "Artículo";
           const total = (it.quantity * parseFloat(it.unit_price)).toFixed(2);
 
-          // Cantidad (Cant.) en su lugar fijo
-          doc.setFont("Helvetica", "normal");
+          doc.setFont("Helvetica", "bold");
           doc.setFontSize(9);
+          const splitName = doc.splitTextToSize(pName, 95);
+          const linesOccupied = splitName.length;
+          const dateYOffset = 6 + (linesOccupied * 4.5);
+          const totalRowHeight = dateYOffset + 8;
+
+          // 🔄 Control de salto para productos
+          if (currentY + totalRowHeight > 270) {
+            doc.addPage();
+            drawSubsequentHeader(); // Invoca la cabecera sutil lineal
+            currentY = 25;          // Posición Y inicial más alta para aprovechar la hoja nueva
+            drawTableTh(currentY);
+            currentY += 8;
+          }
+
+          doc.setFont("Helvetica", "normal");
+          doc.setTextColor(51, 51, 51);
           doc.text(`${it.quantity}`, 23, currentY + 6);
 
-          // 🛡️ ESCUDO ANTI-DESBORDES: Corta el texto automáticamente si supera los 95mm de ancho
           doc.setFont("Helvetica", "bold");
-          const splitName = doc.splitTextToSize(pName, 95);
           doc.text(splitName, 32, currentY + 6);
 
-          // Calculamos cuántas líneas ocupó el nombre largo para empujar la fecha de despacho de forma dinámica
-          const linesOccupied = splitName.length;
-          const dateYOffset = 6 + (linesOccupied * 4.5); // Da un salto proporcional limpio hacia abajo
-
-          // Pintamos la fecha y hora calculando el desfase vertical dinámico
           doc.setFont("Helvetica", "italic");
           doc.setFontSize(8);
-          doc.setTextColor(100, 116, 139); // Gris contable
+          doc.setTextColor(100, 116, 139);
           doc.text(`Despachado el: ${fDespacho} hrs`, 32, currentY + dateYOffset);
 
-          // Pintamos los montos de la derecha en sus coordenadas seguras fijas
           doc.setFont("Helvetica", "normal");
           doc.setFontSize(9);
           doc.setTextColor(51, 51, 51);
           doc.text(`S/ ${parseFloat(it.unit_price).toFixed(2)}`, 135, currentY + 6);
           doc.text(`S/ ${total}`, 170, currentY + 6);
 
-          // Incrementamos el eje Y sumando el espacio dinámico que ocuparon las líneas del texto largo
           currentY += dateYOffset + 6;
         });
 
+        // 🔄 Control de salto preventivo para el Historial de Pagos
+        if (currentY > 245) {
+          doc.addPage();
+          drawSubsequentHeader();
+          currentY = 25;
+        }
 
-
-        // 💰 TITULO: HISTORIAL DE COBRANZA
         currentY += 10;
         doc.setFont("Helvetica", "bold");
         doc.setFontSize(11);
+        doc.setTextColor(30, 41, 59);
         doc.text("HISTORIAL CRONOLÓGICO DE RECAUDACIÓN EN CAJA", 20, currentY);
         currentY += 6;
 
         if (paymentsList.length > 0) {
           paymentsList.forEach((p: any) => {
+            // Si hay demasiados abonos, también controlamos su salto
+            if (currentY > 270) {
+              doc.addPage();
+              drawSubsequentHeader();
+              currentY = 25;
+            }
             const pDate = new Date(p.full_date || p.created_at).toLocaleDateString("es-PE");
+            const paymentMethodText = p.method ? `[${p.method}]` : '';
+
             doc.setFillColor(249, 250, 251);
             doc.rect(20, currentY, 170, 8, "F");
             doc.setFont("Helvetica", "normal");
             doc.setFontSize(9);
-
-            // 🟢 INYECCIÓN DEL MÉTODO DE PAGO: Jalamos la propiedad p.method de forma limpia
-            const paymentMethodText = p.method ? `[${p.method}]` : '';
-            doc.text(`Abono realizado el ${pDate} a las ${p.time || 'hrs'} hrs mediante ${paymentMethodText} — `,  23, currentY + 6);
-
+            doc.setTextColor(51, 51, 51);
+            doc.text(`Abono realizado el ${pDate} a las ${p.time || 'hrs'} hrs mediante ${paymentMethodText} — `, 23, currentY + 6);
             doc.setFont("Helvetica", "bold");
             doc.text(`+ S/ ${parseFloat(p.amount).toFixed(2)}`, 170, currentY + 6);
             currentY += 8;
           });
         } else {
-
           doc.setFont("Helvetica", "italic");
+          doc.setFontSize(9);
+          doc.setTextColor(120, 120, 120);
           doc.text("No se registran abonos parciales realizados a este lote.", 25, currentY + 6);
           currentY += 8;
         }
 
-        // Bloque de Totales Finales Cuadrados abajo a la derecha
+        // 🔄 Control de salto preventivo para el Cuadro de Totales Finales
+        if (currentY > 240) {
+          doc.addPage();
+          drawSubsequentHeader();
+          currentY = 25;
+        }
+
         currentY += 10;
         doc.setFillColor(249, 250, 251);
-        doc.rect(120, currentY, 70, 24, "F");
+        doc.setDrawColor(226, 232, 240);
+        doc.rect(120, currentY, 70, 24, "FD");
+
         doc.setFont("Helvetica", "normal");
-        doc.text("TOTAL VALORIZADO:", 123, currentY + 6); doc.text(`S/ ${parseFloat(lote.total_amount).toFixed(2)}`, 170, currentY + 6);
-        doc.text("TOTAL AMORTIZADO:", 123, currentY + 12); doc.text(`S/ ${parseFloat(lote.paid_amount).toFixed(2)}`, 170, currentY + 12);
-        doc.setDrawColor(200, 200, 200);
+        doc.setTextColor(51, 51, 51);
+        doc.text("TOTAL VALORIZADO:", 123, currentY + 6);
+        doc.text(`S/ ${parseFloat(lote.total_amount).toFixed(2)}`, 170, currentY + 6);
+
+        doc.text("TOTAL AMORTIZADO:", 123, currentY + 12);
+        doc.text(`S/ ${parseFloat(lote.paid_amount).toFixed(2)}`, 170, currentY + 12);
+
         doc.line(123, currentY + 15, 187, currentY + 15);
         doc.setFont("Helvetica", "bold");
-        doc.text("SALDO DEUDA:", 123, currentY + 21); doc.text(`S/ ${parseFloat(lote.pending_balance).toFixed(2)}`, 170, currentY + 21);
+        doc.text("SALDO DEUDA:", 123, currentY + 21);
+        doc.text(`S/ ${parseFloat(lote.pending_balance).toFixed(2)}`, 170, currentY + 21);
 
-        // 🔥 LA MAGIA DE LA DESCARGA INSTANTÁNEA:
-        // El navegador descarga el archivo de forma directa sin abrir pestañas feas
         const cleanFileName = `ESTADO_CUENTA_${clientName.replace(/\s+/g, '_')}_${lote.notes}.pdf`;
         doc.save(cleanFileName);
 
       } catch (error) {
         console.error("Error generando el PDF directo", error);
-        alert("Ocurrió un inconveniente técnico al armar el PDF. Por favor verifica las importaciones.");
+        alert("Ocurrió un inconveniente técnico al armar el PDF.");
       }
       return;
     }
+
+
+
 
     // 🖨️ CASO B: IMPRESIÓN DE TICKET TÉRMICO DE 80MM (Mantiene tu canal directo a la ticketera)
     const printWindow = window.open("", "_blank");
@@ -1387,6 +1614,7 @@ export default function CreditsPage() {
       printWindow.close();
     }, 300);
   };
+
 
 
 
