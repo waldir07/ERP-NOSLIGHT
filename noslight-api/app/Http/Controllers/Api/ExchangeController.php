@@ -30,8 +30,8 @@ class ExchangeController extends Controller
         $user = $request->user();
         $sale = Sale::findOrFail($request->sale_id);
 
-       // $tienda = Warehouse::firstOrCreate(['code' => 'TIENDA'], ['name' => 'Tienda Principal']);
-       // $mermas = Warehouse::firstOrCreate(['code' => 'MERMAS'], ['name' => 'Almacén de Mermas']);
+        // $tienda = Warehouse::firstOrCreate(['code' => 'TIENDA'], ['name' => 'Tienda Principal']);
+        // $mermas = Warehouse::firstOrCreate(['code' => 'MERMAS'], ['name' => 'Almacén de Mermas']);
 
         // Ajustamos los códigos para que coincidan exactamente con tu base de datos real
         $tienda = Warehouse::where('code', 'TIENDA')->first()
@@ -47,7 +47,7 @@ class ExchangeController extends Controller
             // =======================================================
             // 1. PROCESAR DEVOLUCIONES (Lo que entra y se quita del ticket)
             // =======================================================
-           {/*-- $warehouseDestino = $request->condition === 'good' ? $tienda : $mermas;
+            {/*-- $warehouseDestino = $request->condition === 'good' ? $tienda : $mermas;
 
             foreach ($request->return_items as $item) {
                 if ($item['return_qty'] > 0) {
@@ -88,7 +88,8 @@ class ExchangeController extends Controller
                     }
                 }
             }
-            --*/}
+            --*/
+            }
 
             // =======================================================
             // 1. PROCESAR DEVOLUCIONES (CORREGIDO Y SEGURO)
@@ -102,8 +103,8 @@ class ExchangeController extends Controller
 
                     // A. Buscamos si ya existe el casillero de stock para evitar duplicar
                     $stock = Stock::where('product_variant_id', $item['product_variant_id'])
-                                  ->where('warehouse_id', $warehouseDestino->id)
-                                  ->first();
+                        ->where('warehouse_id', $warehouseDestino->id)
+                        ->first();
 
                     if ($stock) {
                         // Si ya existe en el almacén, sumamos las unidades de forma directa en SQL
@@ -148,7 +149,8 @@ class ExchangeController extends Controller
             // =======================================================
             // 2. PROCESAR NUEVOS PRODUCTOS (Lo que sale y se agrega al ticket)
             // =======================================================
-            {/**foreach ($request->new_items as $item) {
+            {
+                /**foreach ($request->new_items as $item) {
                 if ($item['exchange_qty'] > 0) {
                     $subtotal = $item['exchange_qty'] * $item['price'];
                     $totalNuevo += $subtotal;
@@ -186,9 +188,10 @@ class ExchangeController extends Controller
                         ]);
                     }
                 }
-            }--*/}
+            }--*/
+            }
 
-                        // =======================================================
+            // =======================================================
             // 2. PROCESAR NUEVOS PRODUCTOS (CORREGIDO Y SEGURO)
             // =======================================================
             foreach ($request->new_items as $item) {
@@ -208,8 +211,8 @@ class ExchangeController extends Controller
                     if ($variant) {
                         // B. Buscamos el casillero de inventario de esa variante en la Tienda Principal
                         $stock = Stock::where('product_variant_id', $variant->id)
-                                      ->where('warehouse_id', $tienda->id)
-                                      ->first();
+                            ->where('warehouse_id', $tienda->id)
+                            ->first();
 
                         // CONTROL DE SEGURIDAD INTERNO: Evita colapsos de MySQL
                         if (!$stock || $stock->quantity < $item['exchange_qty']) {
@@ -247,7 +250,7 @@ class ExchangeController extends Controller
             }
 
 
-                        // =======================================================
+            // =======================================================
             // 3. MATEMÁTICA FINANCIERA Y RECALCULO DE TOTALES (CORREGIDO)
             // =======================================================
             $diferencia = $totalNuevo - $totalDevuelto;
@@ -258,25 +261,47 @@ class ExchangeController extends Controller
             // Si es cambio exacto, el total_amount se mantiene equilibrado de forma limpia
             $nuevoTotalVenta = ($sale->total_amount - $totalDevuelto) + $totalNuevo;
             $sale->update(['total_amount' => $nuevoTotalVenta]);
-
+            // 🟢 REEMPLAZO CORREGIDO PARA LA PÁGINA 7 DE TU CONTROLADOR
             if ($diferencia > 0) {
                 $type = 'customer_paid_more';
 
-                // Capturamos el destino de cuenta y le sumamos la nota al costado
-                $destinoBase = $request->input('payment_destination', 'Caja Principal');
-                $destinoFinal = $destinoBase . ' (DIFERENCIA DE CAMBIO)';
+                // 🛡️ Si el frontend envió el array de pagos múltiples estructurado, los procesamos uno a uno
+                if ($request->has('payments') && is_array($request->payments)) {
 
-                $sale->payments()->create([
-                    'user_id'             => $user->id,
-                    'amount'              => $diferencia,
-                    'payment_method'      => $request->payment_method ?? 'efectivo',
-                    'payment_destination' => $destinoFinal,
-                ]);
+                    foreach ($request->payments as $payment) {
+                        // Seguridad: Saltamos cualquier registro con monto vacío o cero
+                        if (($payment['amount'] ?? 0) <= 0) continue;
 
-                // Ajustamos el monto pagado sumándole la diferencia que ingresa a caja
+                        // Extraemos los datos dinámicos mapeados desde React
+                        $metodo = $payment['method'] ?? 'efectivo';
+                        $destinoBase = $payment['destination'] ?? 'Caja Principal';
+                        $destinoFinal = $destinoBase . ' (DIFERENCIA DE CAMBIO)';
+
+                        // Creamos un registro independiente por cada método en la BD
+                        $sale->payments()->create([
+                            'user_id'             => $user->id,
+                            'amount'              => $payment['amount'],
+                            'payment_method'      => $metodo,
+                            'payment_destination' => $destinoFinal,
+                        ]);
+                    }
+                } else {
+                    // Bloque de respaldo (Fallback): Por si el request antiguo no manda el array, guarda en efectivo por defecto
+                    $destinoBase = $request->input('payment_destination', 'Caja Principal');
+                    $destinoFinal = $destinoBase . ' (DIFERENCIA DE CAMBIO)';
+
+                    $sale->payments()->create([
+                        'user_id'             => $user->id,
+                        'amount'              => $diferencia,
+                        'payment_method'      => $request->payment_method ?? 'efectivo',
+                        'payment_destination' => $destinoFinal,
+                    ]);
+                }
+
+                // Finalmente, incrementamos el dinero ingresado al ticket por el valor neto cobrado
                 $sale->increment('paid_amount', $diferencia);
-            }
-            elseif ($diferencia < 0) {
+
+            } elseif ($diferencia < 0) {
                 $type = 'store_credit_issued';
                 $montoFavor = abs($diferencia);
                 $code = 'VALE-' . strtoupper(Str::random(6));
@@ -291,8 +316,7 @@ class ExchangeController extends Controller
 
                 // Como el total de la venta bajó, el paid_amount excedente se compensa con el vale emitido
                 $sale->update(['paid_amount' => $nuevoTotalVenta]);
-            }
-            else {
+            } else {
                 // SINOPSIS: Si la diferencia es EXACTAMENTE 0 (Cambio Exacto)
                 // Forzamos a que el monto pagado sea exactamente igual al nuevo total de la venta
                 $sale->update(['paid_amount' => $nuevoTotalVenta]);
@@ -310,7 +334,6 @@ class ExchangeController extends Controller
                 'store_credit' => $storeCredit,
                 'diferencia'   => $diferencia
             ]);
-
         });
     }
 }

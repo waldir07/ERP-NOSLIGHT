@@ -29,6 +29,9 @@ export const SalesHistoryPage = () => {
   const [polarity, setPolarity] = useState('');
 
 
+
+
+
   // Resumen de totales (KPIs)
   const [totals, setTotals] = useState({ cash: 0, electronic: 0, credit: 0, grandTotal: 0 });
 
@@ -56,6 +59,76 @@ export const SalesHistoryPage = () => {
 
   // 🟢 NUEVO ESTADO PARA LA CUENTA DE DESTINO
   const [exchangePaymentDestination, setExchangePaymentDestination] = useState('Caja Principal');
+
+
+  // 1. 🟢 NUEVO TIPO PARA LOS PAGOS DE CAMBIO
+  interface ExchangePaymentLine {
+    id: string;
+    method: "efectivo" | "yape" | "transferencia";
+    destination: string;
+    amount: string;
+  }
+
+  // 2. Nuevos estados para manejar los pagos de cambio y devoluciones
+  const [yapeAccounts, setYapeAccounts] = useState<string[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<string[]>([]);
+  const [exchangePayments, setExchangePayments] = useState<ExchangePaymentLine[]>([]);
+
+  // 3. Efecto para jalar las configuraciones reales del Dashboard de Admin
+  useEffect(() => {
+    const fetchExchangeSettings = async () => {
+      try {
+        const token = localStorage.getItem("noslight_token");
+        const res = await fetch(import.meta.env.VITE_API_URL + "/api/settings", {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setYapeAccounts(data.yape_accounts || []);
+          setBankAccounts(data.bank_accounts || []);
+        }
+      } catch (error) {
+        console.error("Error al cargar configuraciones de pago para cambios:", error);
+      }
+    };
+    if (exchangeModalOpen) {
+      fetchExchangeSettings();
+    }
+  }, [exchangeModalOpen]);
+
+
+  // 🟢 AQUÍ PEGA LAS TRES FUNCIONES JUNTAS (LÓGICA PURA ANTES DEL RETURN)
+  const addExchangePaymentLine = (suggestedAmount: number) => {
+    const defaultDest = "Caja Principal";
+    setExchangePayments([
+      ...exchangePayments,
+      {
+        id: Math.random().toString(),
+        method: "yape",
+        destination: yapeAccounts.length > 0 ? yapeAccounts[0] : "Yape General",
+        amount: suggestedAmount > 0 ? suggestedAmount.toFixed(2) : "0.00"
+      }
+    ]);
+  };
+
+  const removeExchangePaymentLine = (id: string) => {
+    setExchangePayments(exchangePayments.filter((p) => p.id !== id));
+  };
+
+  const updateExchangePayment = (id: string, field: keyof ExchangePaymentLine, value: string) => {
+    setExchangePayments((prev) =>
+      prev.map((p) => {
+        if (p.id !== id) return p;
+        const newP = { ...p, [field]: value };
+        if (field === "method") {
+          if (value === "efectivo") newP.destination = "Caja Principal";
+          if (value === "yape") newP.destination = yapeAccounts.length > 0 ? yapeAccounts[0] : "Yape General";
+          if (value === "transferencia") newP.destination = bankAccounts.length > 0 ? bankAccounts[0] : "BCP HERMELINDA";
+        }
+        return newP;
+      })
+    );
+  };
 
   const filtrarHoy = () => {
     const localDate = new Date();
@@ -521,52 +594,54 @@ export const SalesHistoryPage = () => {
     setIsProcessingExchange(true);
     try {
       const token = localStorage.getItem("noslight_token");
+
+      // Preparar el cuerpo del request adaptado
+      const requestBody: any = {
+        sale_id: saleToExchange.id,
+        return_items: returnItems,
+        new_items: newItems,
+        condition: returnCondition,
+      };
+
+      // Si el cliente paga diferencia, le inyectamos la colección estructurada de cobros
+      if (diferencia > 0) {
+        requestBody.payments = exchangePayments.map(p => ({
+          method: p.method,
+          destination: p.destination,
+          amount: parseFloat(p.amount) || 0
+        }));
+      }
+
       const res = await fetch(import.meta.env.VITE_API_URL + "/api/exchanges", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
-        body: JSON.stringify({
-          sale_id: saleToExchange.id,
-          return_items: returnItems,
-          new_items: newItems,
-          condition: returnCondition,
-          payment_method: diferencia > 0 ? exchangePaymentMethod : null,
-          // 🟢 ENVIAMOS EL DESTINO DINÁMICO SELECTO
-          payment_destination: diferencia > 0 ? exchangePaymentDestination : null
-        })
+        body: JSON.stringify(requestBody)
       });
 
       const data = await res.json();
 
       if (res.ok) {
-        // ¿Debe pagar en efectivo? ¡Abre la gaveta!
-        if (diferencia > 0 && exchangePaymentMethod === 'efectivo') {
-          console.log("🟢 Abriendo gaveta por pago de diferencia...");
+        // Validación inteligente de apertura de gaveta física si hubo efectivo en alguna línea
+        const tieneEfectivo = diferencia > 0 && exchangePayments.some(p => p.method === 'efectivo' && (parseFloat(p.amount) || 0) > 0);
+        if (tieneEfectivo) {
+          console.log("🟢 Abriendo gaveta por pago mixto de diferencia...");
           fetch("http://localhost:9090/abrir-gaveta").catch(() => { });
         }
 
-
-
-        // ¿Se generó un vale? Avisamos
         if (data.store_credit) {
           alert(`✅ Operación exitosa.\nSe generó un VALE por S/ ${data.store_credit.amount}\nCódigo: ${data.store_credit.code}`);
-
-          // 🟢 IMPRIME EL VALE AUTOMÁTICAMENTE
-          printStoreCreditTicket(
-            data.store_credit,
-            saleToExchange.customer?.name || 'Público General'
-          );
+          printStoreCreditTicket(data.store_credit, saleToExchange.customer?.name || 'Público General');
         } else {
           alert("✅ " + data.message);
         }
 
-        // Limpiar y refrescar
         setExchangeModalOpen(false);
         setSaleToExchange(null);
         setNewItems([]);
-        fetchSalesData(); // Recargamos la tabla
+        fetchSalesData();
       } else {
         alert("Error: " + (data.message || "No se pudo procesar la operación"));
       }
@@ -823,8 +898,19 @@ export const SalesHistoryPage = () => {
                             setSaleToExchange(sale);
                             // Preparamos el array de devoluciones en 0
                             setReturnItems(sale.items.map((item: any) => ({ ...item, return_qty: 0 })));
+                            // Inicializamos con una línea vacía. Se auto-llenará el monto según lo que marquen en el modal
+                            setExchangePayments([
+                              {
+                                id: "1",
+                                method: "efectivo",
+                                destination: "Caja Principal",
+                                amount: "0.00"
+                              }
+                            ]);
                             setExchangeModalOpen(true);
                           }}
+
+
                           className="inline-flex items-center gap-1 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-lg px-2.5 py-1.5 text-xs font-bold shadow-sm transition-all focus:outline-none"
                         >
                           🔄 <span>Cambio</span>
@@ -962,12 +1048,17 @@ export const SalesHistoryPage = () => {
         <div className="p-4 text-xs text-gray-400 font-mono">Panel Conectado y Sincronizado en Tiempo Real</div>
       </div>
 
+
+
       {/* ========================================================= */}
       {/* 🔄 MODAL DE CAMBIOS Y DEVOLUCIONES */}
       {/* ========================================================= */}
       {exchangeModalOpen && saleToExchange && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-[24px] w-full max-w-4xl max-h-[90vh] shadow-2xl flex flex-col overflow-hidden">
+
+          {/* 🛠️ MODIFICACIÓN 1: Cambiamos max-w-4xl por max-w-5xl (Para hacerlo más ancho) */}
+          {/* 🛠️ MODIFICACIÓN 2: Cambiamos max-h-[90vh] por h-[85vh] (Fijamos una altura fija perfecta) */}
+          <div className="bg-white rounded-[24px] w-full max-w-5xl h-[85vh] shadow-2xl flex flex-col overflow-hidden">
 
             {/* Cabecera */}
             <div className="bg-red-600 p-5 flex justify-between items-center text-white shrink-0">
@@ -984,43 +1075,129 @@ export const SalesHistoryPage = () => {
               </button>
             </div>
 
-            {/* Cuerpo del Modal */}
-            <div className="flex-1 overflow-y-auto p-6 bg-gray-50 flex flex-col md:flex-row gap-6">
+            {/* 🟢 CUERPO CENTRAL CON SCROLL VERTICAL GENERAL */}
+            <div className="flex-1 overflow-y-auto p-6 bg-gray-50 space-y-6">
 
-              {/* Columna Izquierda: Lo que el cliente DEVUELVE */}
-              <div className="flex-1 bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-                <h3 className="font-bold text-gray-800 border-b pb-2 mb-3">1. ¿Qué producto está devolviendo?</h3>
+              {/* 🟢 CONTENEDOR FLEX PARA COLOCAR COLUMNAS LADO A LADO */}
+              <div className="flex flex-col lg:flex-row gap-6 items-start">
 
-                <div className="space-y-3">
-                  {returnItems.map((item, idx) => (
-                    <div key={idx} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100">
-                      <div className="flex-1">
-                        <p className="font-bold text-sm text-gray-800">{item.name}</p>
-                        <p className="text-xs text-gray-500">Compró: {item.quantity} und. | Precio: S/ {item.price.toFixed(2)}</p>
+                {/* 🔴 COLUMNA IZQUIERDA: Lo que el cliente DEVUELVE */}
+                <div className="flex-1 bg-white border border-gray-200 rounded-xl p-4 shadow-sm w-full">
+                  <h3 className="font-bold text-gray-800 border-b pb-2 mb-3">1. ¿Qué producto está devolviendo?</h3>
+
+                  <div className="space-y-3">
+                    {returnItems.map((item, idx) => (
+                      <div key={idx} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100">
+                        <div className="flex-1">
+                          <p className="font-bold text-sm text-gray-800">{item.name}</p>
+                          <p className="text-xs text-gray-500">Compró: {item.quantity} und. | Precio: S/ {item.price.toFixed(2)}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReturnItems(prev => prev.map((it, i) => i === idx ? { ...it, return_qty: Math.max(0, it.return_qty - 1) } : it));
+                            }}
+                            className="bg-gray-200 px-2 py-1 rounded font-bold text-xs"
+                          >
+                            -
+                          </button>
+                          <span className="font-bold text-sm w-6 text-center">{item.return_qty}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReturnItems(prev => prev.map((it, i) => i === idx ? { ...it, return_qty: Math.min(it.quantity, it.return_qty + 1) } : it));
+                            }}
+                            className="bg-gray-200 px-2 py-1 rounded font-bold text-xs"
+                          >
+                            +
+                          </button>
+                        </div>
                       </div>
+                    ))}
+                  </div>
+                </div>
 
-                      {/* Controles de cantidad a devolver */}
-                      <div className="flex items-center gap-3 bg-white border rounded-lg p-1">
-                        <button
-                          onClick={() => {
-                            const newItems = [...returnItems];
-                            if (newItems[idx].return_qty > 0) newItems[idx].return_qty--;
-                            setReturnItems(newItems);
-                          }}
-                          className="w-8 h-8 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded-md font-bold text-gray-600"
-                        >-</button>
-                        <span className="w-4 text-center font-bold text-red-600">{item.return_qty}</span>
-                        <button
-                          onClick={() => {
-                            const newItems = [...returnItems];
-                            if (newItems[idx].return_qty < item.quantity) newItems[idx].return_qty++;
-                            setReturnItems(newItems);
-                          }}
-                          className="w-8 h-8 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded-md font-bold text-gray-600"
-                        >+</button>
+                {/* 🔵 COLUMNA DERECHA INTEGRADA: Lo que el cliente SE LLEVA (NUEVO) */}
+                <div className="flex-1 bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col w-full h-[400px]">
+                  <h3 className="font-bold text-gray-800 border-b pb-2 mb-3">3. ¿Qué producto nuevo se lleva?</h3>
+
+                  {/* Mini Buscador */}
+                  <div className="relative mb-4">
+                    <input
+                      type="text"
+                      placeholder="Escribe el código o nombre..."
+                      value={productSearch}
+                      onChange={(e) => searchProductsForExchange(e.target.value)}
+                      className="w-full bg-gray-50 border border-blue-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    />
+
+                    {/* Resultados de búsqueda flotantes */}
+                    {searchResults.length > 0 && (
+                      <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 shadow-2xl rounded-lg mt-1 max-h-48 overflow-y-auto z-10 divide-y divide-gray-100">
+                        {searchResults.map((prod: any) => (
+                          <div
+                            key={prod.id}
+                            onClick={() => addNewItemToExchange(prod)}
+                            className="p-3 hover:bg-blue-50 cursor-pointer flex justify-between items-center"
+                          >
+                            <span className="font-bold text-gray-700 text-xs">{prod.name}</span>
+                            <span className="text-blue-600 font-bold text-xs bg-blue-50 px-2 py-1 rounded">S/ {getRealPrice(prod).toFixed(2)}</span>
+                          </div>
+                        ))}
                       </div>
-                    </div>
-                  ))}
+                    )}
+                  </div>
+
+                  {/* Carrito de Nuevos Productos */}
+                  <div className="space-y-3 flex-1 overflow-y-auto pr-1">
+                    {newItems.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                        <p className="text-xs text-center mt-4">No se han agregado productos nuevos.<br />(Si dejas esto vacío, se creará un Vale a favor por el total devuelto).</p>
+                      </div>
+                    ) : (
+                      newItems.map((item, idx) => (
+                        <div key={idx} className="flex justify-between items-center bg-blue-50/50 p-3 rounded-lg border border-blue-200 shadow-sm">
+                          <div className="flex-1 pr-2">
+                            <p className="font-bold text-sm text-gray-800 leading-tight mb-2">{item.name}</p>
+
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs text-blue-600 font-bold">P. Unit: S/</span>
+                              <input
+                                type="number"
+                                step="0.10"
+                                value={item.price}
+                                onChange={(e) => updateNewItemPrice(item.id, e.target.value)}
+                                onFocus={(e) => e.target.select()}
+                                className="w-20 bg-white border border-blue-300 rounded px-1.5 py-0.5 text-sm font-black text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col items-end gap-2">
+                            <div className="flex items-center gap-2 bg-white border rounded-lg p-1 shadow-sm">
+                              <button
+                                onClick={() => {
+                                  if (item.exchange_qty === 1) {
+                                    setNewItems(newItems.filter(i => i.id !== item.id));
+                                  } else {
+                                    setNewItems(newItems.map(i => i.id === item.id ? { ...i, exchange_qty: i.exchange_qty - 1 } : i));
+                                  }
+                                }}
+                                className="w-7 h-7 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded text-gray-600 font-black"
+                              >-</button>
+                              <span className="w-5 text-center font-black text-blue-700">{item.exchange_qty}</span>
+                              <button
+                                onClick={() => setNewItems(newItems.map(i => i.id === item.id ? { ...i, exchange_qty: i.exchange_qty + 1 } : i))}
+                                className="w-7 h-7 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded text-gray-600 font-black"
+                              >+</button>
+                            </div>
+                            <span className="text-xs font-bold text-gray-500">Sub: S/ {(item.price * item.exchange_qty).toFixed(2)}</span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
 
                 {/* Motivo de Devolución */}
@@ -1038,92 +1215,7 @@ export const SalesHistoryPage = () => {
                       <p className="text-[10px] text-gray-500 leading-tight mt-1">Se envía al almacén de Mermas.</p>
                     </label>
                   </div>
-                </div>
-              </div>
-
-              {/* Columna Derecha: Lo que el cliente SE LLEVA (NUEVO) */}
-              <div className="flex-1 bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col">
-                <h3 className="font-bold text-gray-800 border-b pb-2 mb-3">3. ¿Qué producto nuevo se lleva?</h3>
-
-                {/* Mini Buscador */}
-                <div className="relative mb-4">
-                  <input
-                    type="text"
-                    placeholder="Escribe el código o nombre..."
-                    value={productSearch}
-                    onChange={(e) => searchProductsForExchange(e.target.value)}
-                    className="w-full bg-gray-50 border border-blue-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                  />
-
-                  {/* Resultados de búsqueda flotantes */}
-                  {searchResults.length > 0 && (
-                    <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 shadow-2xl rounded-lg mt-1 max-h-48 overflow-y-auto z-10 divide-y divide-gray-100">
-                      {searchResults.map((prod: any) => (
-                        <div
-                          key={prod.id}
-                          onClick={() => addNewItemToExchange(prod)}
-                          className="p-3 hover:bg-blue-50 cursor-pointer flex justify-between items-center"
-                        >
-                          <span className="font-bold text-gray-700 text-xs">{prod.name}</span>
-                          {/* 🟢 Mostramos el precio real cazado de la BD */}
-                          <span className="text-blue-600 font-bold text-xs bg-blue-50 px-2 py-1 rounded">S/ {getRealPrice(prod).toFixed(2)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Carrito de Nuevos Productos */}
-                <div className="space-y-3 flex-1 overflow-y-auto pr-1">
-                  {newItems.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                      <p className="text-xs text-center mt-4">No se han agregado productos nuevos.<br />(Si dejas esto vacío, se creará un Vale a favor por el total devuelto).</p>
-                    </div>
-                  ) : (
-                    newItems.map((item, idx) => (
-                      <div key={idx} className="flex justify-between items-center bg-blue-50/50 p-3 rounded-lg border border-blue-200 shadow-sm">
-                        <div className="flex-1 pr-2">
-                          <p className="font-bold text-sm text-gray-800 leading-tight mb-2">{item.name}</p>
-
-                          {/* 🟢 NUEVO: PRECIO EDITABLE */}
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs text-blue-600 font-bold">P. Unit: S/</span>
-                            <input
-                              type="number"
-                              step="0.10"
-                              value={item.price}
-                              onChange={(e) => updateNewItemPrice(item.id, e.target.value)}
-                              onFocus={(e) => e.target.select()} // Selecciona todo al hacer clic
-                              className="w-20 bg-white border border-blue-300 rounded px-1.5 py-0.5 text-sm font-black text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                            />
-                          </div>
-
-                        </div>
-
-                        <div className="flex flex-col items-end gap-2">
-                          <div className="flex items-center gap-2 bg-white border rounded-lg p-1 shadow-sm">
-                            <button
-                              onClick={() => {
-                                if (item.exchange_qty === 1) {
-                                  setNewItems(newItems.filter(i => i.id !== item.id));
-                                } else {
-                                  setNewItems(newItems.map(i => i.id === item.id ? { ...i, exchange_qty: i.exchange_qty - 1 } : i));
-                                }
-                              }}
-                              className="w-7 h-7 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded text-gray-600 font-black"
-                            >-</button>
-                            <span className="w-5 text-center font-black text-blue-700">{item.exchange_qty}</span>
-                            <button
-                              onClick={() => setNewItems(newItems.map(i => i.id === item.id ? { ...i, exchange_qty: i.exchange_qty + 1 } : i))}
-                              className="w-7 h-7 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded text-gray-600 font-black"
-                            >+</button>
-                          </div>
-                          <span className="text-xs font-bold text-gray-500">Sub: S/ {(item.price * item.exchange_qty).toFixed(2)}</span>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
+                </div>  
               </div>
 
             </div>
@@ -1135,80 +1227,124 @@ export const SalesHistoryPage = () => {
               const totalNuevo = newItems.reduce((sum, item) => sum + (item.exchange_qty * item.price), 0);
               const diferencia = totalNuevo - totalDevuelto;
 
+              // Calculamos cuánto va pagando la cajera en el desglose múltiple
+              const totalPagadoMúltiple = exchangePayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+              const faltanteMúltiple = diferencia - totalPagadoMúltiple;
+
               return (
-                <div className="bg-white border-t p-5 shrink-0 flex flex-col md:flex-row justify-between items-center gap-4">
-                  <div className="flex flex-wrap gap-6 text-sm items-center">
-                    <div>
-                      <p className="text-gray-500 font-bold uppercase">Devuelve:</p>
-                      <p className="text-xl font-black text-red-600">S/ {totalDevuelto.toFixed(2)}</p>
+                <div className="bg-white border-t p-5 shrink-0 flex flex-col gap-4">
+                  <div className="flex flex-col md:flex-row justify-between items-center gap-4 w-full">
+                    <div className="flex flex-wrap gap-6 text-sm items-center">
+                      <div>
+                        <p className="text-gray-500 font-bold uppercase text-xs">Devuelve:</p>
+                        <p className="text-xl font-black text-red-600">S/ {totalDevuelto.toFixed(2)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 font-bold uppercase text-xs">Se lleva:</p>
+                        <p className="text-xl font-black text-blue-600">S/ {totalNuevo.toFixed(2)}</p>
+                      </div>
+                      <div className="border-l pl-6">
+                        <p className="text-gray-500 font-bold uppercase text-xs">Resultado Final:</p>
+                        {diferencia === 0 ? (
+                          <p className="text-xl font-black text-green-600">CAMBIO EXACTO (S/ 0.00)</p>
+                        ) : diferencia > 0 ? (
+                          <p className="text-xl font-black text-orange-600">PAGA POR DIFERENCIA: S/ {diferencia.toFixed(2)}</p>
+                        ) : (
+                          <p className="text-xl font-black text-purple-600">VALE A FAVOR: S/ {Math.abs(diferencia).toFixed(2)}</p>
+                        )}
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-gray-500 font-bold uppercase">Se lleva:</p>
-                      <p className="text-xl font-black text-blue-600">S/ {totalNuevo.toFixed(2)}</p>
-                    </div>
-                    <div className="border-l pl-6">
-                      <p className="text-gray-500 font-bold uppercase">Resultado Final:</p>
-                      {diferencia === 0 ? (
-                        <p className="text-xl font-black text-green-600">CAMBIO EXACTO (S/ 0.00)</p>
-                      ) : diferencia > 0 ? (
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
-                          <p className="text-xl font-black text-orange-600 mr-2">PAGA: S/ {diferencia.toFixed(2)}</p>
 
-                          {/* Selector de Método */}
-                          <select
-                            value={exchangePaymentMethod}
-                            onChange={(e) => {
-                              const method = e.target.value;
-                              setExchangePaymentMethod(method);
-                              // Auto-ajuste de destino por defecto para ahorrar clics
-                              if (method === 'efectivo') setExchangePaymentDestination('Caja Principal');
-                              if (method === 'yape') setExchangePaymentDestination('Yape General');
-                              if (method === 'transferencia') setExchangePaymentDestination('BCP HERMELINDA');
-                            }}
-                            className="bg-orange-50 border border-orange-200 text-orange-800 text-xs font-bold rounded p-1.5 outline-none cursor-pointer"
-                          >
-                            <option value="efectivo">💵 Efectivo</option>
-                            <option value="yape">📱 Yape/Plin</option>
-                            <option value="transferencia">🏦 Transf.</option>
-                          </select>
-
-                          {/* 🟢 Selector de Cuenta Destino Dinámica según el método */}
-                          <select
-                            value={exchangePaymentDestination}
-                            onChange={(e) => setExchangePaymentDestination(e.target.value)}
-                            className="bg-gray-50 border border-gray-200 text-gray-700 text-xs font-bold rounded p-1.5 outline-none cursor-pointer"
-                          >
-                            {exchangePaymentMethod === 'efectivo' && (
-                              <option value="Caja Principal">Caja Principal</option>
-                            )}
-                            {exchangePaymentMethod === 'yape' && (
-                              <>
-                                <option value="Yape General">Yape General</option>
-                                <option value="Plin Negocio">Plin Negocio</option>
-                              </>
-                            )}
-                            {exchangePaymentMethod === 'transferencia' && (
-                              <>
-                                <option value="BCP HERMELINDA">BCP HERMELINDA</option>
-                                <option value="BBVA Intercambio">BBVA Intercambio</option>
-                              </>
-                            )}
-                          </select>
-
-                        </div>
-                      ) : (
-                        <p className="text-xl font-black text-purple-600">VALE A FAVOR: S/ {Math.abs(diferencia).toFixed(2)}</p>
-                      )}
-                    </div>
+                    <button
+                      onClick={handleProcessExchange}
+                      disabled={totalDevuelto === 0 || isProcessingExchange || (diferencia > 0 && Math.abs(faltanteMúltiple) > 0.01)}
+                      className="bg-gray-900 hover:bg-black disabled:bg-gray-300 text-white px-8 py-3 rounded-xl font-bold transition-all shadow-lg flex items-center gap-2 text-base w-full md:w-auto justify-center"
+                    >
+                      {isProcessingExchange ? 'Procesando...' : 'Procesar Operación'}
+                    </button>
                   </div>
 
-                  <button
-                    onClick={handleProcessExchange}
-                    disabled={totalDevuelto === 0 || isProcessingExchange}
-                    className="bg-gray-900 hover:bg-black disabled:bg-gray-300 text-white px-8 py-3 rounded-xl font-bold transition-all shadow-lg flex items-center gap-2 text-base"
-                  >
-                    {isProcessingExchange ? 'Procesando...' : 'Procesar Operación'}
-                  </button>
+                  {/* 💳 SECCIÓN DE PAGO MULTIDIVIDIDO SCON CUENTAS DEL ADMIN (Solo si hay diferencia positiva) */}
+                  {diferencia > 0 && (
+                    <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200 mt-2">
+                      <div className="flex justify-between items-center mb-3">
+                        <span className="text-xs font-black text-gray-500 uppercase tracking-wider">Desglose de Pago de Diferencia</span>
+                        <button
+                          type="button"
+                          onClick={() => addExchangePaymentLine(faltanteMúltiple > 0 ? faltanteMúltiple : 0)}
+                          className="text-blue-600 font-bold text-xs flex items-center gap-1 hover:text-blue-800 bg-white border px-3 py-1.5 rounded-lg shadow-sm"
+                        >
+                          ➕ Dividir pago
+                        </button>
+                      </div>
+
+                      <div className="space-y-2">
+                        {exchangePayments.map((p, idx) => (
+                          <div key={p.id} className="bg-white p-3 rounded-xl border flex flex-wrap sm:flex-nowrap items-center gap-3 shadow-2xs">
+                            <select
+                              value={p.method}
+                              onChange={(e) => updateExchangePayment(p.id, "method", e.target.value)}
+                              className="bg-gray-50 border rounded-lg px-2 py-1.5 text-xs font-bold text-gray-700 outline-none"
+                            >
+                              <option value="efectivo">💵 Efectivo</option>
+                              <option value="yape">📱 Yape / Plin</option>
+                              <option value="transferencia">🏦 Transf.</option>
+                            </select>
+
+                            {p.method !== "efectivo" ? (
+                              <select
+                                value={p.destination}
+                                onChange={(e) => updateExchangePayment(p.id, "destination", e.target.value)}
+                                className="flex-1 bg-gray-50 border rounded-lg px-2 py-1.5 text-xs font-semibold text-gray-700 outline-none"
+                              >
+                                {(p.method === "yape" ? yapeAccounts : bankAccounts).map((opt) => (
+                                  <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                                {(p.method === "yape" ? yapeAccounts : bankAccounts).length === 0 && (
+                                  <option value="">No hay cuentas configuradas</option>
+                                )}
+                              </select>
+                            ) : (
+                              <div className="flex-1 text-sm text-gray-500 font-medium pl-2">Caja Principal</div>
+                            )}
+
+                            <div className="relative w-28">
+                              <span className="absolute left-2.5 top-1.5 text-xs text-gray-400 font-bold">S/</span>
+                              <input
+                                type="number"
+                                value={p.amount}
+                                onChange={(e) => updateExchangePayment(p.id, "amount", e.target.value)}
+                                onFocus={(e) => e.target.select()}
+                                className="w-full pl-7 pr-2 py-1 border rounded-lg text-right font-black text-sm text-gray-800"
+                              />
+                            </div>
+
+                            {exchangePayments.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => removeExchangePaymentLine(p.id)}
+                                className="text-red-400 hover:text-red-600 p-1"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Estado de cuadre financiero del control de cambios */}
+                      <div className="mt-3 pt-3 border-t border-dashed flex justify-between items-center text-xs font-bold">
+                        {faltanteMúltiple > 0.01 ? (
+                          <span className="text-red-600 bg-red-50 px-3 py-1 rounded-md">⚠️ Falta cubrir: S/ {faltanteMúltiple.toFixed(2)}</span>
+                        ) : faltanteMúltiple < -0.01 ? (
+                          <span className="text-purple-600 bg-purple-50 px-3 py-1 rounded-md">📋 Exceso en métodos: S/ {Math.abs(faltanteMúltiple).toFixed(2)} (Ajustar montos)</span>
+                        ) : (
+                          <span className="text-green-600 bg-green-50 px-3 py-1 rounded-md">✅ Desglose de caja exacto y completo</span>
+                        )}
+                        <span className="text-gray-500">Registrado en Caja: S/ {totalPagadoMúltiple.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })()}
