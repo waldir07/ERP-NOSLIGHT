@@ -46,7 +46,7 @@ class Product extends Model
         return $query->where('is_raw', false);
     }
 
-        // ==================== TRANSFORMACIONES ====================
+    // ==================== TRANSFORMACIONES ====================
 
     public function rawTransformations()
     {
@@ -64,8 +64,8 @@ class Product extends Model
             'raw_product_id',
             'finished_product_id'
         )
-        ->withPivot('id','raw_amperage', 'finished_amperage', 'conversion_rate', 'extra_cost', 'notes')
-        ->withTimestamps();
+            ->withPivot('id', 'raw_amperage', 'finished_amperage', 'conversion_rate', 'extra_cost', 'notes')
+            ->withTimestamps();
     }
 
     /**
@@ -91,5 +91,4 @@ class Product extends Model
     {
         return $this->hasMany(Product::class, 'raw_product_id');
     }
-
 }

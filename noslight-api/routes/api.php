@@ -19,6 +19,8 @@ use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\InventoryAdjustmentController;
 use App\Http\Controllers\SettingController; // Asegúrate de importar el controlador arriba
 
+use App\Http\Controllers\API\DashboardController;
+
 
 
 /*
@@ -148,6 +150,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
 
     Route::get('/credits/vales/{saleId}/payments', [\App\Http\Controllers\Api\CreditController::class, 'getValePayments']);
+
+    Route::get('/dashboard/charts', [DashboardController::class, 'getChartsData']);
 
 
 });
