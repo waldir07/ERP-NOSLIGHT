@@ -151,7 +151,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/credits/vales/{saleId}/payments', [\App\Http\Controllers\Api\CreditController::class, 'getValePayments']);
 
-    Route::get('/dashboard/charts', [DashboardController::class, 'getChartsData']);
+    Route::get('/dashboard/charts', [\App\Http\Controllers\Api\DashboardController::class, 'getChartsData']);
+
 
 
 });
