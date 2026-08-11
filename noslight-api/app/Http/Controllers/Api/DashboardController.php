@@ -137,12 +137,12 @@ class DashboardController extends Controller
         }
 
         // =========================================================================
-        // 🔮 4. PANEL DE REPOSICIÓN PREDICTIVA REAL (BASADO EN VENTAS DE PRODUCCIÓN)
+        // 🔮 4. PANEL DE REPOSICIÓN PREDICTIVA (FILTRADO POR TU SUCURSAL REAL)
         // =========================================================================
         try {
             $thirtyDaysAgo = \Carbon\Carbon::now()->subDays(30);
 
-            // Subconsulta: Calculamos cuántas unidades se venden por día de cada variante en los últimos 30 días
+            // Velocidad de venta basada en salidas de los últimos 30 días
             $salesVelocity = DB::table('sale_items')
                 ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
                 ->select('sale_items.product_variant_id', DB::raw('SUM(sale_items.quantity) / 30 as unidades_por_dia'))
@@ -150,7 +150,7 @@ class DashboardController extends Controller
                 ->where('sales.status', '!=', 'cancelled')
                 ->groupBy('sale_items.product_variant_id');
 
-            // Cruzamos el stock actual de la tienda con su velocidad de venta real
+            // Consulta amarrada quirúrgicamente a la Tienda Principal (ID 2)
             $lowStockData = DB::table('stocks')
                 ->join('product_variants', 'stocks.product_variant_id', '=', 'product_variants.id')
                 ->join('products', 'product_variants.product_id', '=', 'products.id')
@@ -163,25 +163,26 @@ class DashboardController extends Controller
                     'products.package_size as limit',
                     DB::raw('IFNULL(velocity.unidades_por_dia, 0) as daily_velocity')
                 )
-                ->where('products.is_raw', false) // Solo terminados de tienda
+                ->where('products.is_raw', false) // Solo terminados
+                ->where('stocks.warehouse_id', '=', 2) // 👈 FILTRO MAESTRO: Solo evalúa el stock de tu "Tienda Principal"
                 ->where('products.package_size', '>', 0)
-                ->whereRaw('stocks.quantity < products.package_size') // Condición física de bajo stock por cajón
+                ->whereRaw('stocks.quantity < products.package_size') // Alerta si cae por debajo del cajón de empaque
+                ->limit(10)
                 ->get();
 
             $lowStockList = array();
             foreach ($lowStockData as $prod) {
                 $velocity = (float) $prod->daily_velocity;
 
-                // Si el producto NO tiene ventas (velocidad 0), le ponemos 999 días para que no aparezca como urgente
                 if ($velocity <= 0) {
-                    $daysRemaining = 999;
+                    $daysRemaining = 999; // Stock estancado, no urge
                 } else {
                     $daysRemaining = (int) round($prod->current / $velocity);
                 }
 
                 $pct = $prod->limit > 0 ? round(($prod->current / $prod->limit) * 100) : 0;
 
-                // Solo dejamos pasar al dashboard los que realmente corren riesgo de agotarse en 15 días o menos
+                // Solo inyectamos al panel alertas reales que venzan en menos de 15 días
                 if ($daysRemaining <= 15) {
                     $lowStockList[] = [
                         'name' => $prod->name,
@@ -193,7 +194,7 @@ class DashboardController extends Controller
                 }
             }
 
-            // Ordenamos el arreglo para que los productos con menos días de vida salgan arriba
+            // Ordenamos para priorizar los quiebres inminentes
             usort($lowStockList, function($a, $b) {
                 return $a['days'] <=> $b['days'];
             });
