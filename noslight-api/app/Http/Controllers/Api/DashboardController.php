@@ -170,31 +170,38 @@ class DashboardController extends Controller
                 ->limit(10)
                 ->get();
 
-            $lowStockList = array();
+           $lowStockList = array();
             foreach ($lowStockData as $prod) {
                 $velocity = (float) $prod->daily_velocity;
 
                 if ($velocity <= 0) {
-                    $daysRemaining = 999; // Stock estancado, no urge
+                    $daysRemaining = 999; // No tiene ventas en los últimos 30 días
                 } else {
                     $daysRemaining = (int) round($prod->current / $velocity);
                 }
 
                 $pct = $prod->limit > 0 ? round(($prod->current / $prod->limit) * 100) : 0;
 
-                // Solo inyectamos al panel alertas reales que venzan en menos de 15 días
-                if ($daysRemaining <= 15) {
+                // 🛠️ REGLA DE DOBLE ALERTA CALIBRADA:
+                // CONDICIÓN 1: El producto está en Cero Absoluto (Agotado total en mostrador)
+                // CONDICIÓN 2: El stock físico actual cayó por debajo del 25% de su cajón (Package_size)
+                // CONDICIÓN 3: Las ventas son fluidas y el stock solo cubre 15 días o menos
+                if ($prod->current == 0 || $pct <= 25 || $daysRemaining <= 15) {
+
+                    // Si está en cero absoluto, forzamos que diga 0 días para alertar al cajero
+                    $displayDays = ($prod->current == 0) ? 0 : $daysRemaining;
+
                     $lowStockList[] = [
                         'name' => $prod->name,
                         'current' => (int) $prod->current,
                         'limit' => (int) $prod->limit,
                         'pct' => $pct > 100 ? 100 : $pct,
-                        'days' => $daysRemaining
+                        'days' => $displayDays
                     ];
                 }
             }
 
-            // Ordenamos para priorizar los quiebres inminentes
+            // Ordenamos el listado: Los productos en Cero Absoluto (0 días) van de primeros arriba
             usort($lowStockList, function($a, $b) {
                 return $a['days'] <=> $b['days'];
             });
