@@ -19,7 +19,9 @@ use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\InventoryAdjustmentController;
 use App\Http\Controllers\SettingController; // Asegúrate de importar el controlador arriba
 
-use App\Http\Controllers\API\DashboardController;
+// OJO: el namespace real es 'Api', no 'API'. En Windows el filesystem no distingue
+// mayúsculas y esto pasa desapercibido, pero en Linux revienta con "Class not found".
+use App\Http\Controllers\Api\DashboardController;
 
 
 
@@ -151,7 +153,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/credits/vales/{saleId}/payments', [\App\Http\Controllers\Api\CreditController::class, 'getValePayments']);
 
-    Route::get('/dashboard/charts', [\App\Http\Controllers\Api\DashboardController::class, 'getChartsData']);
+    Route::get('/dashboard/charts', [DashboardController::class, 'getChartsData']);
 
 
 

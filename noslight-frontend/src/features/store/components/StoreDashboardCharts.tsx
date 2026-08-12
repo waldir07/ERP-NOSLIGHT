@@ -1,17 +1,54 @@
 // src/features/store/components/StoreDashboardCharts.tsx
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Chart from 'react-apexcharts';
-import { ApexOptions } from 'apexcharts';
+import type { ApexOptions } from 'apexcharts'; // 👈 Esto ya lo corrigió Claude con éxito
 import axios from 'axios';
-import { TrendingUp, Clock, ShieldCheck } from 'lucide-react';
+import { TrendingUp, Clock, ShieldCheck, RefreshCw, HelpCircle, FileClock } from 'lucide-react';
+
+type CoverageStatus = 'agotado' | 'critico' | 'alerta' | 'vigilar';
+
+
+interface LowStockItem {
+  name: string;
+  sku: string;
+  current: number;
+  limit: number;
+  pct: number;
+  days: number | null; // null si no tiene rotación
+  dailyVelocity: number;
+  hasVelocity: boolean;
+  status: CoverageStatus;
+}
 
 interface DashboardData {
-  salesByHour: { categories: string[]; todayData: number[]; historyData: number[] };
-  motivation: { currentWeek: number; avgWeek: number; percent: number };
-  topProducts: { categories: string[]; data: number[] };
-  vipCustomers: { labels: string[]; data: number[] };
-  creditRecords: { labels: string[]; data: number[] }; // 👈 Interface actualizada
-  lowStock: { name: string; current: number; limit: number; pct: number; days: number }[];
+  salesByHour: {
+    categories: string[];
+    todayData: number[];
+    historyData: number[];
+    pendingData: number[];
+  };
+  motivation: {
+    currentWeek: number;
+    avgWeek: number;
+    percent: number;
+  };
+  topProducts: {
+    categories: string[];
+    data: number[];
+  };
+  vipCustomers: {
+    labels: string[];
+    data: number[];
+  };
+  creditRecords: {
+    labels: string[];
+    data: number[];
+  };
+  pendingVales?: {
+    count: number;
+    amount: number;
+  };
+  lowStock: LowStockItem[];
 }
 
 export default function StoreDashboardCharts() {
@@ -19,29 +56,35 @@ export default function StoreDashboardCharts() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        setLoading(true);
-        const token = localStorage.getItem("noslight_token");
-        const response = await axios.get(`${import.meta.env.VITE_API_URL}/api/dashboard/charts`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: "application/json"
-          }
-        });
-        setData(response.data);
-        setError(null);
-      } catch (err) {
+  const fetchDashboardData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const token = localStorage.getItem("noslight_token");
+      const response = await axios.get(`${import.meta.env.VITE_API_URL}/api/dashboard/charts`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json"
+        }
+      });
+      setData(response.data);
+      setError(null);
+    } catch (err: any) {
+      // Manejo específico de autenticación
+      if (err?.response?.status === 401) {
+        console.warn('API returned 401 — token inválido o expirado');
+        setError('Sesión expirada. Por favor inicia sesión.');
+      } else {
         console.error("Error al conectar con la API de Laravel:", err);
         setError("No se pudieron cargar los datos del servidor.");
-      } finally {
-        setLoading(false);
       }
-    };
-
-    fetchDashboardData();
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, [fetchDashboardData]);
 
   if (loading) {
     return (
@@ -64,16 +107,17 @@ export default function StoreDashboardCharts() {
   const lineChartOptions: ApexOptions = {
     chart: { id: 'sales-by-hour', toolbar: { show: false }, fontFamily: 'Inter, sans-serif' },
     xaxis: { categories: data.salesByHour.categories },
-    stroke: { curve: 'smooth', width: 3, dashArray: [0, 5] },
-    colors: ['#3b82f6', '#9ca3af'],
+    stroke: { curve: 'smooth', width: [3, 3, 2], dashArray: [0, 4, 6] },
+    colors: ['#3b82f6', '#9ca3af', '#f59e0b'],
+    tooltip: { shared: true, intersect: false, y: { formatter: (val) => `S/ ${val.toFixed(2)}` } },
     title: { text: 'Ritmo de Ventas: Hoy vs Promedio Histórico', style: { fontSize: '16px', fontWeight: 600, color: '#1f2937' } },
-    tooltip: { y: { formatter: (val) => `S/ ${val.toFixed(2)}` } },
     legend: { position: 'top', horizontalAlign: 'right' }
   };
 
   const lineChartSeries = [
     { name: 'Facturado Hoy (S/)', data: data.salesByHour.todayData },
-    { name: 'Promedio Histórico Día (S/)', data: data.salesByHour.historyData }
+    { name: 'Promedio Histórico Día (S/)', data: data.salesByHour.historyData },
+    { name: 'Vales Pendientes (S/)', data: data.salesByHour.pendingData }
   ];
 
   const barChartOptions: ApexOptions = {
@@ -124,6 +168,16 @@ export default function StoreDashboardCharts() {
               {data.motivation.percent >= 0 ? '+' : ''}{data.motivation.percent}%
             </p>
           </div>
+          <div className="flex flex-col items-center gap-1">
+            <button
+              onClick={fetchDashboardData}
+              title="Actualizar"
+              className="p-2 bg-white/10 rounded-full border border-white/10 hover:bg-white/20">
+              <RefreshCw className="w-5 h-5 text-white" />
+            </button>
+            <p className="text-xs text-white/90 mt-1">Vales: <strong>{data.pendingVales?.count ?? 0}</strong></p>
+            <p className="text-[10px] text-white/80">S/ {(data.pendingVales?.amount ?? 0).toLocaleString('es-PE', { minimumFractionDigits: 2 })}</p>
+          </div>
         </div>
       </div>
 
@@ -152,11 +206,19 @@ export default function StoreDashboardCharts() {
 
           <div className="flex flex-col gap-4 overflow-y-auto pr-2 flex-1 scrollbar-thin scrollbar-thumb-gray-200">
             {data.lowStock.map((prod, i) => {
-              // Determinamos el color de alerta en base a los días de cobertura restantes
-              const isCritical = prod.days <= 3;
+              // 1. Declaramos primero si el producto está estancado o agotado
+              const isAgotado = prod.current === 0;
+              const isEstancado = prod.days === null || prod.days === 999;
+
+              // 2. Ahora sí calculamos si es crítico protegiendo el null con ?? 999
+              const isCritical = (prod.days ?? 999) <= 3 && !isEstancado && !isAgotado;
+
+              // 3. El color del badge reacciona según los estados
               const badgeColor = isCritical
                 ? "bg-red-50 text-red-700 border-red-200 animate-pulse"
-                : "bg-amber-50 text-amber-700 border-amber-200";
+                : isEstancado
+                  ? "bg-gray-100 text-gray-600 border-gray-300"
+                  : "bg-amber-50 text-amber-700 border-amber-200";
 
               return (
                 <div key={i} className="flex flex-col gap-1.5 border-b border-gray-50 pb-3 last:border-0">
