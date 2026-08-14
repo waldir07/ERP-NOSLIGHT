@@ -1,5 +1,5 @@
 // src/features/warehouse/components/TransformForm.tsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRawStock } from "../hooks/useWarehouse";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { performTransform } from "../api/warehouseApi";
@@ -9,7 +9,7 @@ import { StockItem } from "../types";
 
 export default function TransformForm() {
   const { data: rawProductsData = [], isLoading: loadingRaw } = useRawStock();
-  const { success, error: toastError } = useToast();
+  const { error: toastError } = useToast();
   const queryClient = useQueryClient();
 
   // Estados de la interfaz
@@ -32,6 +32,14 @@ export default function TransformForm() {
   const [quantity, setQuantity] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
   const [loadingOptions, setLoadingOptions] = useState(false);
+  const [transformStatus, setTransformStatus] = useState<"idle" | "pending" | "success" | "error">("idle");
+  const mutateStartRef = useRef<number | null>(null);
+  // Confirmación antes de ejecutar la transformación
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  const MIN_PENDING_MS = 600; // ensure pending visible at least this long
+  const SUCCESS_VISIBLE_MS = 1000;
+  const ERROR_VISIBLE_MS = 2000;
 
   // Filtrar la lista de la izquierda por búsqueda
   // Ponemos a nuestro espía aquí para ver qué llega desde Laravel
@@ -59,10 +67,16 @@ export default function TransformForm() {
 
   // Efecto: Cargar los productos terminados cuando se selecciona un Raw
   useEffect(() => {
+    // If no selection, clear and exit
     if (!selectedRaw) {
       setPossibleFinished([]);
       setSelectedFinished(null);
       setQuantity("");
+      return;
+    }
+
+    // Avoid fetching options while a transformation is pending
+    if (transformStatus === "pending") {
       return;
     }
 
@@ -88,30 +102,90 @@ export default function TransformForm() {
     };
 
     fetchOptions();
-    setSelectedFinished(null); // Resetear selección
-    setQuantity(""); // Resetear cantidad
   }, [selectedRaw]);
 
   // Ejecutar transformación
   const mutation = useMutation({
     mutationFn: performTransform,
-    onSuccess: () => {
+    // Optimistic update: decrement local selectedRaw and cache immediately
+    onMutate: async (newTransform: any) => {
+      mutateStartRef.current = Date.now();
+      setTransformStatus("pending");
+      await queryClient.cancelQueries({ queryKey: ["rawStock"] });
+      const previousRawStock = queryClient.getQueryData<any[]>(["rawStock"]);
+
+      // update cache optimistically
+      queryClient.setQueryData(["rawStock"], (old: any[] | undefined) => {
+        if (!old) return old;
+        return old.map((it) => {
+          if (selectedRaw && it.id === selectedRaw.id) {
+            const newQty = Math.max(0, (it.quantity || 0) - (newTransform.quantity || 0));
+            return { ...it, quantity: newQty };
+          }
+          return it;
+        });
+      });
+
+      // update local selectedRaw for immediate UI feedback
+      setSelectedRaw((prev) => {
+        if (!prev) return prev;
+        const newQty = Math.max(0, (prev.quantity || 0) - (newTransform.quantity || 0));
+        return { ...prev, quantity: newQty } as typeof prev;
+      });
+
+      return { previousRawStock };
+    },
+    onError: (err: any, _vars: any, context: any) => {
+      // rollback cache immediately
+      if (context?.previousRawStock) {
+        queryClient.setQueryData(["rawStock"], context.previousRawStock);
+        if (selectedRaw) {
+          const original = context.previousRawStock?.find((i: any) => i.id === selectedRaw.id);
+          if (original) setSelectedRaw(original);
+        }
+      }
+
+      const elapsed = mutateStartRef.current ? Date.now() - mutateStartRef.current : MIN_PENDING_MS;
+      const wait = Math.max(0, MIN_PENDING_MS - elapsed);
+
+      // after ensuring minimum pending duration, show error animation then toast
+      setTimeout(() => {
+        setTransformStatus("error");
+        setTimeout(() => {
+          toastError(err.response?.data?.message || "Error al realizar la transformación");
+          setTransformStatus("idle");
+        }, ERROR_VISIBLE_MS);
+      }, wait);
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["rawStock"] });
       queryClient.invalidateQueries({ queryKey: ["finishedStock"] });
-
-      success("¡Transformación realizada con éxito!");
-
-      // Limpiar formulario pero mantener el producto seleccionado por si quiere hacer otra
-      setSelectedFinished(null);
-      setQuantity("");
-      setNotes("");
     },
-    onError: (err: any) => {
-      toastError(
-        err.response?.data?.message || "Error al realizar la transformación",
-      );
+    onSuccess: () => {
+      const elapsed = mutateStartRef.current ? Date.now() - mutateStartRef.current : MIN_PENDING_MS;
+      const wait = Math.max(0, MIN_PENDING_MS - elapsed);
+
+      setTimeout(() => {
+        setTransformStatus("success");
+        setTimeout(() => {
+          // limpiar formulario y volver a idle
+          setSelectedFinished(null);
+          setQuantity("");
+          setNotes("");
+          setTransformStatus("idle");
+        }, SUCCESS_VISIBLE_MS);
+      }, wait);
     },
   });
+
+  // Keep selectedRaw in sync with server data when rawProductsData refetches
+  useEffect(() => {
+    if (!selectedRaw) return;
+    const updated = rawProductsData.find((i: any) => i.id === selectedRaw.id);
+    if (updated && updated.quantity !== selectedRaw.quantity) {
+      setSelectedRaw(updated);
+    }
+  }, [rawProductsData]);
 
   const handleSubmit = () => {
     if (!selectedRaw || !selectedFinished || !quantity) {
@@ -132,13 +206,24 @@ export default function TransformForm() {
       return;
     }
 
-    // Aquí enviamos la información exacta al nuevo backend:
+    // Abrir diálogo de confirmación en vez de mutar inmediatamente
+    setShowConfirm(true);
+  };
+
+  const confirmAndSubmit = () => {
+    if (!selectedRaw || !selectedFinished || !quantity) {
+      setShowConfirm(false);
+      return;
+    }
+
+    const qty = Number(quantity);
     mutation.mutate({
       raw_product_id: Number(selectedRaw.product_variant?.product_id),
       finished_product_id: Number(selectedFinished.finished_product_id),
       quantity: qty,
       notes: notes || undefined,
     });
+    setShowConfirm(false);
   };
 
   if (loadingRaw) {
@@ -337,10 +422,12 @@ export default function TransformForm() {
                       <button
                         key={finished.finished_product_id}
                         onClick={() => setSelectedFinished(finished)}
+                        disabled={mutation.isPending}
+                        aria-disabled={mutation.isPending}
                         className={`text-left p-4 rounded-xl border-2 transition-all ${isSelected
                           ? "border-blue-600 bg-blue-50 shadow-md"
                           : "border-gray-200 bg-white hover:border-blue-300"
-                          }`}
+                          } ${mutation.isPending ? 'opacity-60 pointer-events-none' : ''}`}
                       >
                         <p className="font-bold text-gray-900 text-sm mb-1">
                           {finished.sku}
@@ -362,7 +449,38 @@ export default function TransformForm() {
 
             {/* Formulario final (Solo se muestra si hay una opción seleccionada) */}
             {selectedFinished && (
-              <div className="mt-auto bg-gray-50 p-6 rounded-2xl border border-gray-200">
+              <div className="mt-auto bg-gray-50 p-6 rounded-2xl border border-gray-200 relative">
+                {transformStatus !== "idle" && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-2xl">
+                    <div className="flex items-center gap-3 px-6 py-4 bg-white/90 rounded-lg shadow-lg">
+                      {transformStatus === "pending" && (
+                        <>
+                          <svg className="w-6 h-6 animate-spin text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                          </svg>
+                          <span className="text-sm font-medium text-gray-700">Procesando transformación...</span>
+                        </>
+                      )}
+                      {transformStatus === "success" && (
+                        <>
+                          <svg className="w-8 h-8 text-green-600 transform animate-pop" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                          <span className="text-sm font-medium text-gray-700">Transformación exitosa</span>
+                        </>
+                      )}
+                      {transformStatus === "error" && (
+                        <>
+                          <svg className="w-8 h-8 text-red-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                          <span className="text-sm font-medium text-gray-700">Error: no se pudo transformar</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <h3 className="text-lg font-semibold text-gray-800 mb-4">
                   2. Ingresa los detalles
                 </h3>
@@ -380,6 +498,8 @@ export default function TransformForm() {
                       min={1}
                       placeholder={`Max: ${selectedRaw.quantity}`}
                       className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none text-lg font-bold"
+                      disabled={mutation.isPending}
+                      aria-disabled={mutation.isPending}
                     />
                   </div>
                   <div className="md:col-span-2">
@@ -392,18 +512,57 @@ export default function TransformForm() {
                       onChange={(e) => setNotes(e.target.value)}
                       placeholder="Ej: Transformación solicitada por Tienda 1"
                       className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none"
+                      disabled={mutation.isPending}
+                      aria-disabled={mutation.isPending}
                     />
                   </div>
                 </div>
 
+                {/* Dialogo de confirmación antes de enviar */}
+                {showConfirm && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                    <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-lg">
+                      <h4 className="text-lg font-bold mb-2">Confirma transformación</h4>
+                      <p className="text-sm text-gray-700 mb-4">
+                        ¿Estás seguro de transformar <strong>{selectedRaw.product_variant?.product?.name}</strong>
+                        {` (${selectedRaw.product_variant?.sku || `M-${selectedRaw.product_variant?.product?.base_code}`}) `}
+                        a <strong>{selectedFinished.finished_product_name}</strong> en cantidad <strong>{quantity}</strong>?
+                      </p>
+                      <div className="flex gap-3 justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setShowConfirm(false)}
+                          disabled={mutation.isPending}
+                          className="px-4 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={confirmAndSubmit}
+                          disabled={mutation.isPending}
+                          className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {mutation.isPending ? 'Procesando...' : 'Sí, transformar'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <button
                   onClick={handleSubmit}
                   disabled={mutation.isPending || !quantity}
-                  className="w-full bg-blue-600 text-white font-bold text-lg py-4 rounded-xl hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+                  aria-busy={mutation.isPending}
+                  className="w-full bg-blue-600 text-white font-bold text-lg py-4 rounded-xl hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center justify-center gap-3"
                 >
-                  {mutation.isPending
-                    ? "Procesando..."
-                    : "Confirmar Transformación"}
+                  {mutation.isPending && (
+                    <svg className="w-5 h-5 animate-spin text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                    </svg>
+                  )}
+                  <span>{mutation.isPending ? 'Procesando...' : 'Confirmar Transformación'}</span>
                 </button>
               </div>
             )}
