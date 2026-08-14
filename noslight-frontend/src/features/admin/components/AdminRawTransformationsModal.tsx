@@ -26,6 +26,8 @@ export default function AdminRawTransformationsModal({
   const [selectedFinishedId, setSelectedFinishedId] = useState<number | null>(
     null,
   );
+  const [finishedQuery, setFinishedQuery] = useState<string>("");
+  const [showFinishedDropdown, setShowFinishedDropdown] = useState(false);
   const [isDirectSale, setIsDirectSale] = useState(
     rawProduct.is_direct_sale || false,
   );
@@ -96,21 +98,53 @@ export default function AdminRawTransformationsModal({
   };
 
   const handleAddTransformation = async () => {
+    // Si el usuario escribió un código pero no hizo click en la opción,
+    // intentamos resolverlo por `base_code` o por coincidencia en el nombre.
     if (!selectedFinishedId) {
-      toastError("Debes seleccionar un producto terminado");
-      return;
+      const q = finishedQuery.trim();
+      if (!q) {
+        toastError("Debes seleccionar un producto terminado");
+        return;
+      }
+
+      // Buscar coincidencia exacta por base_code (case-insensitive), luego por inclusión
+      const exact = finishedProducts.find(
+        (p) => (p.base_code || "").toLowerCase() === q.toLowerCase(),
+      );
+      const fuzzy = exact
+        ? null
+        : finishedProducts.find((p) => {
+            const name = (p.name || "").toLowerCase();
+            const code = (p.base_code || "").toLowerCase();
+            return name.includes(q.toLowerCase()) || code.includes(q.toLowerCase());
+          });
+
+      const found = exact || fuzzy;
+      if (!found) {
+        toastError("No se encontró un producto que coincida con ese código/nombre");
+        return;
+      }
+
+      setSelectedFinishedId(found.id);
+      setFinishedQuery(`${found.name} — ${found.base_code}`);
     }
 
     try {
-     // Buscamos el producto terminado seleccionado para saber su amperaje real
-      const selectedFinishedProduct = finishedProducts.find(p => p.id === selectedFinishedId);
+      // Resolver el producto terminado efectivo a enviar (estado puede no haberse actualizado aún)
+      const selectedFinishedProduct =
+        finishedProducts.find((p) => p.id === selectedFinishedId) ||
+        finishedProducts.find((p) => `${p.name} — ${p.base_code}` === finishedQuery) ||
+        finishedProducts.find((p) => (p.base_code || "").toLowerCase() === finishedQuery.trim().toLowerCase()) ||
+        finishedProducts.find((p) => (p.name || "").toLowerCase().includes(finishedQuery.trim().toLowerCase()));
+
+      const finalSelectedId = selectedFinishedProduct?.id || selectedFinishedId;
 
       await axios.post("/api/product-transformations", {
         raw_product_id: rawProduct.id,
-        raw_amperage: rawProduct.amperage || 0, // Usamos el amperaje real de la base de datos
-        finished_product_id: selectedFinishedId,
-        finished_amperage: selectedFinishedProduct?.amperage || 0, // Usamos el amperaje real del terminado
-        conversion_rate: 1.0, 
+        raw_amperage: rawProduct.amperage || 0,
+        finished_product_id: finalSelectedId,
+        finished_amperage: selectedFinishedProduct?.amperage || 0,
+        conversion_rate: 1.0,
         extra_cost: 0,
         notes: notes.trim(),
       });
@@ -120,6 +154,7 @@ export default function AdminRawTransformationsModal({
       loadData();
 
       setSelectedFinishedId(null);
+      setFinishedQuery("");
       setNotes("");
     } catch (err: any) {
       toastError(
@@ -251,20 +286,50 @@ export default function AdminRawTransformationsModal({
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Producto Terminado
                 </label>
-                <select
-                  value={selectedFinishedId || ""}
-                  onChange={(e) =>
-                    setSelectedFinishedId(Number(e.target.value))
-                  }
-                  className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Selecciona un producto terminado...</option>
-                  {finishedProducts.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} — {p.base_code}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={finishedQuery}
+                    onChange={(e) => {
+                      setFinishedQuery(e.target.value);
+                      setShowFinishedDropdown(true);
+                      setSelectedFinishedId(null);
+                    }}
+                    onFocus={() => setShowFinishedDropdown(true)}
+                    onBlur={() => setTimeout(() => setShowFinishedDropdown(false), 150)}
+                    placeholder="Busca por nombre o código (ej: 12345)..."
+                    className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500"
+                  />
+
+                  {showFinishedDropdown && (
+                    <div className="absolute z-40 left-0 right-0 mt-2 bg-white border border-gray-200 rounded-lg max-h-48 overflow-auto shadow-lg">
+                      {finishedProducts
+                        .filter((p) => {
+                          if (!finishedQuery) return true;
+                          const q = finishedQuery.toLowerCase();
+                          const name = (p.name || "").toLowerCase();
+                          const code = (p.base_code || "").toLowerCase();
+                          return name.includes(q) || code.includes(q);
+                        })
+                        .slice(0, 50)
+                        .map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedFinishedId(p.id);
+                              setFinishedQuery(`${p.name} — ${p.base_code}`);
+                              setShowFinishedDropdown(false);
+                            }}
+                            className="w-full text-left px-4 py-2 hover:bg-gray-100"
+                          >
+                            <div className="text-sm font-medium">{p.name}</div>
+                            <div className="text-xs text-gray-500">{p.base_code}</div>
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div>

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\ProductTransformation;
 use App\Models\Product;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -47,7 +48,28 @@ class ProductTransformationController extends Controller
             return response()->json(['message' => 'El producto seleccionado no es Raw'], 422);
         }
 
-        $transformation = ProductTransformation::create($validated);
+        // Evitar duplicados: existe una restricción UNIQUE en la BD sobre
+        // (raw_product_id, raw_amperage, finished_product_id, finished_amperage).
+        $exists = ProductTransformation::where('raw_product_id', $validated['raw_product_id'])
+            ->where('raw_amperage', $validated['raw_amperage'])
+            ->where('finished_product_id', $validated['finished_product_id'])
+            ->where('finished_amperage', $validated['finished_amperage'])
+            ->exists();
+
+        if ($exists) {
+            return response()->json([
+                'message' => 'Producto repetido: ya existe esa transformación. Elige otro producto o ajusta amperaje.'
+            ], 422);
+        }
+
+        try {
+            $transformation = ProductTransformation::create($validated);
+        } catch (QueryException $ex) {
+            // En caso de carrera u otra violación de integridad, devolver mensaje amigable
+            return response()->json([
+                'message' => 'No se pudo crear la transformación (posible duplicado). Intenta con otro producto.'
+            ], 422);
+        }
 
         return response()->json([
             'message' => 'Transformación configurada correctamente',
