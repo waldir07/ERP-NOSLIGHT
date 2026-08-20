@@ -215,28 +215,23 @@ class SaleController extends Controller
             }
         }
 
-        if ($request->filled('brand')) {
-            $brand = $request->brand;
-            $query->whereHas('items.productVariant.product', function ($q) use ($brand, $columnaMarca) {
-                $q->where($columnaMarca, 'like', '%' . $brand . '%');
-            });
-        }
-        if ($request->filled('model')) {
-            $model = $request->model;
-            $query->whereHas('items.productVariant.product', function ($q) use ($model, $columnaModelo) {
-                $q->where($columnaModelo, 'like', '%' . $model . '%');
-            });
-        }
-        if ($request->filled('amperage')) {
-            $amperage = $request->amperage;
-            $query->whereHas('items.productVariant.product', function ($q) use ($amperage, $columnaAmperaje) {
-                $q->where($columnaAmperaje, 'like', '%' . $amperage . '%');
-            });
-        }
-        if ($request->filled('polarity')) {
-            $polarity = $request->polarity;
-            $query->whereHas('items.productVariant.product', function ($q) use ($polarity, $columnaPolaridad) {
-                $q->where($columnaPolaridad, 'like', '%' . $polarity . '%');
+        if ($request->filled('brand') || $request->filled('model') || $request->filled('amperage') || $request->filled('polarity')) {
+            $query->whereHas('items.productVariant.product', function ($q) use ($request, $columnaMarca, $columnaModelo, $columnaAmperaje, $columnaPolaridad) {
+                if ($request->filled('brand')) {
+                    $q->where($columnaMarca, 'like', '%' . $request->brand . '%');
+                }
+
+                if ($request->filled('model')) {
+                    $q->where($columnaModelo, 'like', '%' . $request->model . '%');
+                }
+
+                if ($request->filled('amperage')) {
+                    $q->where($columnaAmperaje, 'like', '%' . $request->amperage . '%');
+                }
+
+                if ($request->filled('polarity')) {
+                    $q->where($columnaPolaridad, 'like', '%' . $request->polarity . '%');
+                }
             });
         }
         // =========================================================================
@@ -279,7 +274,18 @@ class SaleController extends Controller
         $grandTotal = $cashTotal + $electronicTotal;
 
         // 6. FILTRO DE VISTA INTELIGENTE
-        if (!$request->filled('start_date') && !$request->filled('end_date')) {
+        // Solo aplicamos la vista por defecto cuando no hay filtros activos.
+        // Si el usuario ya está filtrando, no debemos mezclarle ventas pendientes fuera del criterio.
+        $hasActiveFilters = $request->filled('search')
+            || $request->filled('start_date')
+            || $request->filled('end_date')
+            || $request->filled('sale_type')
+            || $request->filled('brand')
+            || $request->filled('model')
+            || $request->filled('amperage')
+            || $request->filled('polarity');
+
+        if (!$hasActiveFilters) {
             $todayStr = \Carbon\Carbon::now('America/Lima')->toDateString();
 
             $hayVentasHoy = \App\Models\Sale::whereDate('created_at', $todayStr)->exists();

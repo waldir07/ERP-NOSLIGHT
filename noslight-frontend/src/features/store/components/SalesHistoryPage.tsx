@@ -165,7 +165,7 @@ export const SalesHistoryPage = () => {
   // Escucha todos los filtros estables para recargar la tabla desde Laravel
   useEffect(() => {
     fetchSalesData(page);
-  }, [page, startDate, endDate, saleType, debouncedSearch, brand, model, amperage, polarity, searchQuery]);
+  }, [page, startDate, endDate, saleType, debouncedSearch, brand, model, amperage, polarity]);
 
 
 
