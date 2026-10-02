@@ -15,6 +15,7 @@ class CreditPayment extends Model
         'user_id',
         'amount',
         'payment_method',
+        'payment_destination',
         'payment_date',
     ];
     protected $casts = [

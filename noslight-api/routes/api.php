@@ -112,6 +112,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/credits/accounts', [\App\Http\Controllers\Api\CreditController::class, 'getAccounts']);
     Route::post('/credits/customers/{id}/payments', [\App\Http\Controllers\Api\CreditController::class, 'addPayment']);
+    Route::post('/admin/credits/{credit}/waive', [\App\Http\Controllers\Api\CreditController::class, 'waive']);
     Route::get('/credits/customers/{id}/statement', [CreditController::class, 'getCustomerStatement']);
     Route::post('/credits/approve-group', [\App\Http\Controllers\Api\CreditController::class, 'approveGroup']);
 

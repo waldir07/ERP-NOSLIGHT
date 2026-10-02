@@ -168,7 +168,7 @@ class CreditController extends Controller
 
             $newDocumentDebt = DB::table('credits')
                 ->where('customer_id', $customer->id)
-                ->whereIn('status', ['pending', 'partial'])
+                ->whereIn('status', ['pending', 'partial', 'overdue'])
                 ->sum('remaining_amount');
 
             $customer->credit_balance = (float)($legacyDebt + $newDocumentDebt);
@@ -344,6 +344,11 @@ class CreditController extends Controller
                 $obj = new \stdClass();
                 $obj->amount = (float)$p['amount'];
                 $obj->method = strtolower($p['method']);
+                $obj->destination = match ($obj->method) {
+                    'yape' => $p['yape_account'] ?? null,
+                    'transferencia' => $p['bank_account'] ?? null,
+                    default => null,
+                };
                 $paymentsQueue[] = $obj;
             }
 
@@ -376,6 +381,7 @@ class CreditController extends Controller
                         'user_id' => $request->user()->id,
                         'amount' => $amountToApply,
                         'payment_method' => $paymentsQueue[$currentKey]->method, // Flecha directa de objeto
+                        'payment_destination' => $paymentsQueue[$currentKey]->destination,
                         'payment_date' => now()->toDateString(),
                         'notes' => 'Abono directo al lote: ' . $credit->notes
                     ]);
@@ -453,6 +459,69 @@ class CreditController extends Controller
         });
     }
 
+    public function waive(Request $request, $creditId)
+    {
+        return DB::transaction(function () use ($request, $creditId) {
+            $credit = \App\Models\Credit::whereKey($creditId)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if (!in_array($credit->status, ['pending', 'partial', 'overdue'], true)) {
+                return response()->json([
+                    'message' => 'Solo se pueden condonar créditos pendientes, parciales o vencidos.'
+                ], 422);
+            }
+
+            if ((float) $credit->remaining_amount <= 0) {
+                return response()->json([
+                    'message' => 'El crédito no tiene saldo pendiente para condonar.'
+                ], 422);
+            }
+
+            $customer = Customer::whereKey($credit->customer_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $waivedNote = 'Condonación administrativa sin pago';
+            $notes = trim((string) $credit->notes);
+
+            if ($notes === '') {
+                $notes = $waivedNote;
+            } elseif (stripos($notes, $waivedNote) === false) {
+                $notes .= ' | ' . $waivedNote;
+            }
+
+            $credit->update([
+                'remaining_amount' => 0,
+                'status' => 'waived',
+                'notes' => $notes,
+                'waived_at' => now(),
+                'waived_by' => $request->user()->id,
+            ]);
+
+            $legacyDebt = DB::table('sales')
+                ->leftJoin('sale_items', 'sale_items.sale_id', '=', 'sales.id')
+                ->where('sales.customer_id', $customer->id)
+                ->where('sales.status', 'credit')
+                ->sum('sale_items.subtotal');
+
+            $newDocumentDebt = DB::table('credits')
+                ->where('customer_id', $customer->id)
+                ->whereIn('status', ['pending', 'partial', 'overdue'])
+                ->sum('remaining_amount');
+
+            $customer->update([
+                'credit_balance' => max(0, (float) $legacyDebt + (float) $newDocumentDebt),
+            ]);
+
+            return response()->json([
+                'message' => 'Crédito condonado administrativamente sin registrar un pago.',
+                'credit' => $credit->fresh(),
+                'credit_balance' => $customer->credit_balance,
+            ]);
+        });
+    }
+
 
 
     public function getCustomerStatement(Request $request, $id)
@@ -469,6 +538,33 @@ class CreditController extends Controller
 
         $loteIds = $lotesDb->pluck('id')->toArray();
 
+        $waivedUserNames = \App\Models\User::whereIn(
+            'id',
+            $lotesDb->pluck('waived_by')->filter()->unique()->values()
+        )->pluck('name', 'id');
+
+        $allCreditPayments = \App\Models\CreditPayment::with('user')
+            ->whereIn('credit_id', $loteIds)
+            ->orderBy('created_at')
+            ->get()
+            ->map(function ($item) {
+                return [
+                    'id' => 'pay_' . $item->id,
+                    'credit_id' => $item->credit_id,
+                    'amount' => (float) $item->amount,
+                    'payment_method' => $item->payment_method,
+                    'payment_date' => $item->payment_date,
+                    'created_at' => $item->created_at,
+                    'date' => \Carbon\Carbon::parse($item->payment_date)->format('Y-m-d'),
+                    'time' => \Carbon\Carbon::parse($item->created_at)->format('H:i'),
+                    'full_date' => $item->created_at,
+                    'method' => strtoupper($item->payment_method),
+                    'payment_destination' => $item->payment_destination,
+                    'user_id' => $item->user_id,
+                    'user_name' => $item->user?->name,
+                ];
+            });
+
         // Relaciones intermedias indexadas
         $creditSalesIndexed = DB::table('credit_sales')
             ->whereIn('credit_id', $loteIds)
@@ -483,7 +579,7 @@ class CreditController extends Controller
         $salesHistoryIndexed = $salesDb->groupBy('id');
 
         // 3. 🎫 Estructuramos los lotes inmutables inyectando la identidad visual de sus vales originales
-        $mappedCredits = $lotesDb->map(function ($credit) use ($creditSalesIndexed, $salesHistoryIndexed) {
+        $mappedCredits = $lotesDb->map(function ($credit) use ($creditSalesIndexed, $salesHistoryIndexed, $waivedUserNames) {
             $connectedSaleIds = isset($creditSalesIndexed[$credit->id])
                 ? $creditSalesIndexed[$credit->id]->pluck('sale_id')->toArray()
                 : [];
@@ -528,6 +624,11 @@ class CreditController extends Controller
                 'real_status' => $credit->status,
                 'created_at' => $credit->created_at,
                 'updated_at' => $credit->updated_at,
+                'waived_at' => $credit->waived_at,
+                'waived_by' => $credit->waived_by,
+                'waived_by_name' => $credit->waived_by
+                    ? ($waivedUserNames[$credit->waived_by] ?? null)
+                    : null,
                 'notes' => str_replace('DOC-COBRO-', 'LOTE-VALORIZADO-', $credit->notes),
                 'id_compuesto' => $credit->notes,
                 'items' => $consolidatedItems, // La lista unificada que tu frontend ya sabe mapear perfectamente
@@ -586,10 +687,10 @@ class CreditController extends Controller
             });
 
         // Sincronizamos abonos en memoria
-        $paymentsGroupedByCredit = $payments->groupBy('credit_id');
-        $mappedCredits = $mappedCredits->map(function ($lote) use ($paymentsGroupedByCredit) {
+        $allPaymentsGroupedByCredit = $allCreditPayments->groupBy('credit_id');
+        $mappedCredits = $mappedCredits->map(function ($lote) use ($allPaymentsGroupedByCredit) {
             $rawId = (int) str_replace('lote_', '', $lote['id']);
-            $lote['payments'] = isset($paymentsGroupedByCredit[$rawId]) ? $paymentsGroupedByCredit[$rawId]->values()->toArray() : [];
+            $lote['payments'] = collect($allPaymentsGroupedByCredit->get($rawId, []))->values()->toArray();
             return $lote;
         });
 
@@ -610,13 +711,16 @@ class CreditController extends Controller
 
         $lotesHistory = $mappedCredits->map(function ($lote) {
             $createdAt = \Carbon\Carbon::parse($lote['created_at']);
+            $isWaived = $lote['real_status'] === 'waived';
             return [
                 'id' => $lote['id'],
                 'date' => $createdAt->format('Y-m-d'),
                 'time' => $createdAt->format('H:i'),
                 'full_date' => $lote['created_at'],
-                'type' => 'VENTA',
-                'description' => str_replace('LOTE-VALORIZADO-', 'LOTE-COBRO #', $lote['notes']),
+                'type' => $isWaived ? 'CONDONACIÓN' : 'VENTA',
+                'description' => $isWaived
+                    ? 'Condonación administrativa sin pago - ' . $lote['notes']
+                    : str_replace('LOTE-VALORIZADO-', 'LOTE-COBRO #', $lote['notes']),
                 'amount' => (float)$lote['pending_balance'],
                 'details' => $lote['items'],
                 'is_payment' => false
@@ -658,9 +762,8 @@ class CreditController extends Controller
 
         foreach ($mappedCredits as $lote) {
             // Buscamos las trazas de abonos que corresponden estrictamente a este lote
-            $lotePayments = isset($paymentsGroupedByCredit[$lote['raw_id'] ?? (int)str_replace('lote_', '', $lote['id'])])
-                ? $paymentsGroupedByCredit[$lote['raw_id'] ?? (int)str_replace('lote_', '', $lote['id'])]->values()->toArray()
-                : [];
+            $lotePaymentId = $lote['raw_id'] ?? (int)str_replace('lote_', '', $lote['id']);
+            $lotePayments = collect($allPaymentsGroupedByCredit->get($lotePaymentId, []))->values()->toArray();
 
             $lote['payments'] = $lotePayments;
 
@@ -668,7 +771,7 @@ class CreditController extends Controller
             $createdAt = \Carbon\Carbon::parse($lote['created_at']);
             $updatedAt = \Carbon\Carbon::parse($lote['updated_at'] ?? $lote['created_at']);
 
-            $daysToPay = $lote['status'] === 'paid' || (float)$lote['pending_balance'] <= 0
+            $daysToPay = in_array($lote['real_status'], ['paid', 'waived'], true) || (float)$lote['pending_balance'] <= 0
                 ? (int) ceil($createdAt->diffInMinutes($updatedAt) / 1440)
                 : (int) ceil($createdAt->diffInMinutes(now()) / 1440);
 
@@ -686,8 +789,8 @@ class CreditController extends Controller
             }
 
             // Separación por cajones según balance
-            if ($lote['status'] === 'paid' || (float)$lote['pending_balance'] <= 0) {
-                $lote['status'] = 'paid';
+            if (in_array($lote['real_status'], ['paid', 'waived'], true) || (float)$lote['pending_balance'] <= 0) {
+                $lote['status'] = $lote['real_status'] === 'waived' ? 'waived' : 'paid';
                 $paidLotesAll[] = $lote; // Acumulamos en el saco histórico total
             } else {
                 $activeLotes[] = $lote; // Se queda arriba en la pasarela activa para cobrar

@@ -293,6 +293,55 @@ export default function CreditsPage() {
     }
   };
 
+  const handleWaiveCredit = async (credit: any) => {
+    const creditId = String(credit.id).replace('lote_', '');
+    const pendingBalance = parseFloat(credit.pending_balance || 0);
+    const realStatus = credit.real_status || credit.status;
+
+    if (pendingBalance <= 0 || realStatus === 'paid' || realStatus === 'waived') {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      '¿Condonar este lote?\n\nEl saldo pendiente será eliminado como deuda. Esta operación NO registra un pago ni genera un ingreso de caja.'
+    );
+
+    if (!confirmed) return;
+
+    try {
+      const token = localStorage.getItem("noslight_token");
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/admin/credits/${creditId}/waive`,
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || "No se pudo condonar el crédito.");
+      }
+
+      alert("Crédito condonado administrativamente sin registrar un pago.");
+      await fetchAccounts();
+
+      if (selectedAccount) {
+        await openAccountStatement(
+          { ...selectedAccount, history: [] },
+          startDate,
+          endDate,
+          true,
+        );
+      }
+    } catch (error: any) {
+      alert(error.message || "Error al condonar el crédito.");
+    }
+  };
+
   // Función actualizada para registrar el abono por lotes, abrir gaveta e imprimir opcionalmente
   const handleAddPayment = async (action: "print" | "no-print" = "print") => {
     const totalPaid = payments.reduce(
@@ -368,6 +417,8 @@ export default function CreditsPage() {
       );
 
       if (res.ok) {
+        const accountToRefresh = selectedAccount;
+
         // 1. SI HAY EFECTIVO (Total o mixto), ABRIMOS LA GAVETA
         if (hasEfectivo) {
           console.log("🟢 Abono con efectivo detectado. Abriendo gaveta...");
@@ -388,9 +439,12 @@ export default function CreditsPage() {
         // Limpiar todo, reiniciar estados del carrusel y cerrar modal lateral
         setSelectedGroupCodes([]);
         setActiveDetailCode(null);
-        setSelectedAccount(null);
         setPayments([{ id: "1", method: "efectivo", amount: "" }]);
-        fetchAccounts();
+        await fetchAccounts();
+
+        if (accountToRefresh) {
+          await openAccountStatement(accountToRefresh, startDate, endDate, true);
+        }
       } else {
         const errData = await res.json();
         alert("Error al registrar: " + (errData.message || "Verifica los datos"));
@@ -441,11 +495,12 @@ export default function CreditsPage() {
     account: any,
     start = startDate,
     end = endDate,
+    force = false,
   ) => {
 
-    // 🔒 CANDADO DE RED: Si el modal ya está abierto gestionando a este mismo cliente 
+    // 🔒 CANDADO DE RED: Si el modal ya está abierto gestionando a este mismo cliente
     // y el historial ya tiene datos cargados, bloqueamos las peticiones repetitivas de red
-    if (selectedAccount?.id === account.id && selectedAccount?.history?.length > 0 && start === startDate && end === endDate) {
+    if (!force && selectedAccount?.id === account.id && selectedAccount?.history?.length > 0 && start === startDate && end === endDate) {
       return;
     }
 
@@ -560,20 +615,20 @@ export default function CreditsPage() {
         <div class="center">*** PROFORMA DE COBRO ***</div>
         <div class="center">${new Date().toLocaleDateString("es-PE", { weekday: "long" })} ${new Date().toLocaleDateString("es-PE")}</div>
         <div class="center" style="font-size:11px;">${new Date().toLocaleTimeString("es-PE")}</div>
-        
+
         <hr>
         <div>Cliente: ${selectedAccount.name}</div>
-        
+
         <hr>
         <div class="bold" style="margin-bottom: 4px;">MOVIMIENTOS:</div>
         ${itemsHtml}
-        
+
         <hr>
         <div class="item bold" style="font-size:15px;">
           <span>TOTAL DEUDA</span>
           <span>S/ ${parseFloat(selectedAccount.credit_balance).toFixed(2)}</span>
         </div>
-        
+
         <hr>
         <div class="center" style="margin-top:12px; font-size:12px;">Favor de cancelar a la brevedad.</div>
       </body>
@@ -681,8 +736,8 @@ export default function CreditsPage() {
       tableRows = `<tr><td colspan="3" style="text-align:center; padding:20px; color:#aaa; font-style:italic;">No hay movimientos registrados.</td></tr>`;
     } else {
       allMovements.forEach((mov: any) => {
-        
-        // 🛡️ BLINDAJE DE FECHA Y HORA CORREGIDO: 
+
+        // 🛡️ BLINDAJE DE FECHA Y HORA CORREGIDO:
         // Tu backend de Laravel envía la fecha exacta dentro de 'full_date' o la hora en 'time'
         let dateString = mov.date + "T00:00:00"; // Valor por defecto
         if (mov.full_date) {
@@ -691,7 +746,7 @@ export default function CreditsPage() {
             dateString = mov.date + "T" + mov.time + ":00";
         }
         const dateObj = new Date(dateString);
-        
+
         // Formato: 1 de junio de 2026
         const formattedDate = dateObj.toLocaleDateString("es-PE", {
           day: "numeric", month: "long", year: "numeric"
@@ -723,22 +778,22 @@ export default function CreditsPage() {
           // 🚀 MEJORA: DIBUJAR PRECIOS Y SUBTOTALES
           // ==========================================
           let productsList = `<strong style="color:#1e293b; font-size: 14px;">${mov.description || 'Despacho'}</strong>`;
-          
+
           if (mov.details && mov.details.length > 0) {
             productsList += `<ul style="margin: 8px 0 0 0; padding-left: 20px; color: #475569; font-size: 13px; list-style-type: square;">`;
-            
+
             mov.details.forEach((d: any) => {
               const productName = d.product_variant?.product?.name || "Producto general";
               const unitPrice = parseFloat(d.unit_price || 0).toFixed(2);
               const subTotalItem = parseFloat(d.subtotal || (d.quantity * parseFloat(d.unit_price || 0))).toFixed(2);
-              
+
               productsList += `<li style="margin-bottom: 6px;">
-                <strong>${d.quantity} und.</strong> x ${productName} 
+                <strong>${d.quantity} und.</strong> x ${productName}
                 <span style="color:#64748b; font-size:11px; margin-left:4px;">(S/ ${unitPrice} c/u)</span>
                 <span style="float:right; font-weight:bold; color:#334155; margin-right: 15px;">S/ ${subTotalItem}</span>
               </li>`;
             });
-            
+
             productsList += `</ul>`;
           }
 
@@ -825,7 +880,7 @@ export default function CreditsPage() {
     printWindow.document.write(pdfHtml);
     printWindow.document.close();
 
-    
+
   };*/
 
   // =========================================================================
@@ -1188,18 +1243,18 @@ export default function CreditsPage() {
      const cleanItems = lote.items?.filter((it: any) => it.quantity > 0) || [];
      const paymentsList = lote.payments || [];
      const isPaid = lote.pending_balance <= 0;
- 
+
      // 📄 CASO A: DESCARGA AUTOMÁTICA DE PDF PURO EN UN SOLO CLIC (Para Mandar por WhatsApp)
      if (format === "pdf") {
        try {
          // Inicializamos la librería nativa jsPDF que ya tiene tu archivo
          // 🟢 LLAMADO DIRECTO: Usa la instancia importada arriba de forma nativa
          const doc = new jsPDF();
- 
- 
+
+
          // Función interna para dibujar el encabezado en la página 1 o páginas siguientes
- 
- 
+
+
          // Diseñamos el encabezado corporativo elegante
          doc.setFont("Helvetica", "bold");
          doc.setFontSize(20);
@@ -1208,24 +1263,24 @@ export default function CreditsPage() {
          doc.setFontSize(10);
          doc.setFont("Helvetica", "normal");
          doc.text("Control Interno de Créditos y Cobranzas", 20, 26);
- 
+
          // Caja de Estado del Lote
- 
+
          doc.setFillColor(isPaid ? 209 : 254, isPaid ? 250 : 226, isPaid ? 229 : 226);
          doc.rect(140, 13, 50, 14, "F");
          doc.setFont("Helvetica", "bold");
          doc.setFontSize(9);
          doc.setTextColor(30, 41, 59);
          doc.text(isPaid ? "TOTALMENTE PAGADO" : "CUENTA PENDIENTE", 143, 21);
- 
- 
- 
- 
+
+
+
+
          // Tabla de Datos del Cliente
          doc.setDrawColor(226, 232, 240);
          doc.setFillColor(248, 250, 252);
          doc.rect(20, 35, 170, 18, "FD");
- 
+
          doc.setFont("Helvetica", "bold");
          doc.setFontSize(9);
          doc.text("CLIENTE:", 25, 42); doc.setFont("Helvetica", "normal"); doc.text(clientName.toUpperCase(), 45, 42);
@@ -1233,12 +1288,12 @@ export default function CreditsPage() {
          doc.text("DOCUMENTO:", 25, 48); doc.setFont("Helvetica", "normal"); doc.text(loteCode, 52, 48);
          doc.setFont("Helvetica", "bold");
          doc.text("FECHA:", 130, 42); doc.setFont("Helvetica", "normal"); doc.text(dateString, 150, 42);
- 
+
          // 📦 TITULO: MERCADERÍA DESPACHADA
          doc.setFont("Helvetica", "bold");
          doc.setFontSize(11);
          doc.text("DESGLOSE DE MERCADERÍA DESPACHADA A CRÉDITO", 20, 63);
- 
+
          let currentY = 70;
          doc.setFillColor(243, 244, 246);
          doc.rect(20, currentY, 170, 8, "F");
@@ -1247,56 +1302,56 @@ export default function CreditsPage() {
          doc.text("Descripción del Producto", 45, currentY + 6);
          doc.text("P. Unit.", 135, currentY + 6);
          doc.text("Subtotal", 170, currentY + 6);
- 
+
          currentY += 8;
- 
- 
+
+
          // 🟢 FORMATEO INDESTRUCIBLE: Soporte multi-línea automático para descripciones ultra-largas
          cleanItems.forEach((it: any) => {
            const fDespacho = it.fecha_despacho || dateString;
            const pName = it.product_variant?.product?.name || "Artículo";
            const total = (it.quantity * parseFloat(it.unit_price)).toFixed(2);
- 
+
            // Cantidad (Cant.) en su lugar fijo
            doc.setFont("Helvetica", "normal");
            doc.setFontSize(9);
            doc.text(`${it.quantity}`, 23, currentY + 6);
- 
+
            // 🛡️ ESCUDO ANTI-DESBORDES: Corta el texto automáticamente si supera los 95mm de ancho
            doc.setFont("Helvetica", "bold");
            const splitName = doc.splitTextToSize(pName, 95);
            doc.text(splitName, 32, currentY + 6);
- 
+
            // Calculamos cuántas líneas ocupó el nombre largo para empujar la fecha de despacho de forma dinámica
            const linesOccupied = splitName.length;
            const dateYOffset = 6 + (linesOccupied * 4.5); // Da un salto proporcional limpio hacia abajo
- 
+
            // Pintamos la fecha y hora calculando el desfase vertical dinámico
            doc.setFont("Helvetica", "italic");
            doc.setFontSize(8);
            doc.setTextColor(100, 116, 139); // Gris contable
            doc.text(`Despachado el: ${fDespacho} hrs`, 32, currentY + dateYOffset);
- 
+
            // Pintamos los montos de la derecha en sus coordenadas seguras fijas
            doc.setFont("Helvetica", "normal");
            doc.setFontSize(9);
            doc.setTextColor(51, 51, 51);
            doc.text(`S/ ${parseFloat(it.unit_price).toFixed(2)}`, 135, currentY + 6);
            doc.text(`S/ ${total}`, 170, currentY + 6);
- 
+
            // Incrementamos el eje Y sumando el espacio dinámico que ocuparon las líneas del texto largo
            currentY += dateYOffset + 6;
          });
- 
- 
- 
+
+
+
          // 💰 TITULO: HISTORIAL DE COBRANZA
          currentY += 10;
          doc.setFont("Helvetica", "bold");
          doc.setFontSize(11);
          doc.text("HISTORIAL CRONOLÓGICO DE RECAUDACIÓN EN CAJA", 20, currentY);
          currentY += 6;
- 
+
          if (paymentsList.length > 0) {
            paymentsList.forEach((p: any) => {
              const pDate = new Date(p.full_date || p.created_at).toLocaleDateString("es-PE");
@@ -1304,22 +1359,22 @@ export default function CreditsPage() {
              doc.rect(20, currentY, 170, 8, "F");
              doc.setFont("Helvetica", "normal");
              doc.setFontSize(9);
- 
+
              // 🟢 INYECCIÓN DEL MÉTODO DE PAGO: Jalamos la propiedad p.method de forma limpia
              const paymentMethodText = p.method ? `[${p.method}]` : '';
              doc.text(`Abono realizado el ${pDate} a las ${p.time || 'hrs'} hrs mediante ${paymentMethodText} — `, 23, currentY + 6);
- 
+
              doc.setFont("Helvetica", "bold");
              doc.text(`+ S/ ${parseFloat(p.amount).toFixed(2)}`, 170, currentY + 6);
              currentY += 8;
            });
          } else {
- 
+
            doc.setFont("Helvetica", "italic");
            doc.text("No se registran abonos parciales realizados a este lote.", 25, currentY + 6);
            currentY += 8;
          }
- 
+
          // Bloque de Totales Finales Cuadrados abajo a la derecha
          currentY += 10;
          doc.setFillColor(249, 250, 251);
@@ -1331,23 +1386,65 @@ export default function CreditsPage() {
          doc.line(123, currentY + 15, 187, currentY + 15);
          doc.setFont("Helvetica", "bold");
          doc.text("SALDO DEUDA:", 123, currentY + 21); doc.text(`S/ ${parseFloat(lote.pending_balance).toFixed(2)}`, 170, currentY + 21);
- 
+
          // 🔥 LA MAGIA DE LA DESCARGA INSTANTÁNEA:
          // El navegador descarga el archivo de forma directa sin abrir pestañas feas
          const cleanFileName = `ESTADO_CUENTA_${clientName.replace(/\s+/g, '_')}_${lote.notes}.pdf`;
          doc.save(cleanFileName);
- 
+
        } catch (error) {
          console.error("Error generando el PDF directo", error);
          alert("Ocurrió un inconveniente técnico al armar el PDF. Por favor verifica las importaciones.");
        }
        return;
      }
- 
+
      */
 
 
   //para analizar si funciona:*/
+
+  const getDocumentEvents = (lote: any) => {
+    const paymentsList = lote.payments || [];
+    const realStatus = lote.real_status || lote.status;
+    const totalAmount = parseFloat(lote.total_amount || 0);
+    const paidAmount = paymentsList.reduce(
+      (sum: number, payment: any) => sum + parseFloat(payment.amount || 0),
+      0,
+    );
+    const waivedAmount = realStatus === "waived"
+      ? Math.max(0, totalAmount - paidAmount)
+      : 0;
+
+    return paymentsList
+      .map((payment: any) => ({
+        type: "payment",
+        date: payment.payment_date || payment.full_date || payment.created_at,
+        time: payment.time || "No registrada",
+        concept: "ABONO",
+        method: payment.method || payment.payment_method || "No registrado",
+        destination: payment.payment_destination || null,
+        userName: payment.user_name || "No registrado",
+        amount: parseFloat(payment.amount || 0),
+        sortDate: payment.created_at || payment.full_date || payment.payment_date || "",
+      }))
+      .concat(realStatus === "waived" ? [{
+        type: "waived",
+        date: lote.waived_at || null,
+        time: lote.waived_at ? new Date(lote.waived_at).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit", hour12: false }) : "No registrada",
+        concept: "CONDONACIÓN ADMINISTRATIVA",
+        method: "No aplica",
+        userName: lote.waived_by_name || "No registrado",
+        amount: waivedAmount,
+        sortDate: lote.waived_at || "",
+      }] : [])
+      .sort((first: any, second: any) => {
+        if (!first.sortDate && !second.sortDate) return 0;
+        if (!first.sortDate) return 1;
+        if (!second.sortDate) return -1;
+        return new Date(first.sortDate).getTime() - new Date(second.sortDate).getTime();
+      });
+  };
 
   const generateDocumentReport = (lote: any, format: "pdf" | "ticket") => {
     const companyName = "Sistema junsu/kyf/noslight/jp.";
@@ -1355,8 +1452,19 @@ export default function CreditsPage() {
     const loteCode = lote.notes.replace('LOTE-VALORIZADO-', 'LOTE #');
     const dateString = new Date(lote.created_at).toLocaleDateString("es-PE");
     const cleanItems = lote.items?.filter((it: any) => it.quantity > 0) || [];
-    const paymentsList = lote.payments || [];
-    const isPaid = lote.pending_balance <= 0;
+    const realStatus = lote.real_status || lote.status;
+    const totalAmount = parseFloat(lote.total_amount || 0);
+    const pendingBalance = parseFloat(lote.pending_balance || 0);
+    const documentEvents = getDocumentEvents(lote);
+    const paidAmount = documentEvents
+      .filter((event: any) => event.type === "payment")
+      .reduce((sum: number, event: any) => sum + event.amount, 0);
+    const waivedAmount = documentEvents.find((event: any) => event.type === "waived")?.amount || 0;
+    const statusLabel = realStatus === "paid"
+      ? "PAGADO"
+      : realStatus === "waived"
+        ? "CONDONADO"
+        : "PENDIENTE";
 
     if (format === "pdf") {
       try {
@@ -1374,12 +1482,13 @@ export default function CreditsPage() {
           doc.text("Control Interno de Créditos y Cobranzas", 20, 26);
 
           // Caja de Estado del Lote
-          doc.setFillColor(isPaid ? 209 : 254, isPaid ? 250 : 226, isPaid ? 229 : 226);
+          const isClosed = realStatus === "paid" || realStatus === "waived";
+          doc.setFillColor(realStatus === "waived" ? 254 : isClosed ? 209 : 254, realStatus === "waived" ? 243 : isClosed ? 250 : 226, realStatus === "waived" ? 199 : isClosed ? 229 : 226);
           doc.rect(140, 13, 50, 14, "F");
           doc.setFont("Helvetica", "bold");
           doc.setFontSize(9);
           doc.setTextColor(30, 41, 59);
-          doc.text(isPaid ? "TOTALMENTE PAGADO" : "CUENTA PENDIENTE", 143, 22);
+          doc.text(statusLabel, 143, 22);
         };
 
         // 🍃 ENCABEZADO SUTIL (Para la Página 2 en adelante)
@@ -1493,26 +1602,46 @@ export default function CreditsPage() {
         doc.text("HISTORIAL CRONOLÓGICO DE RECAUDACIÓN EN CAJA", 20, currentY);
         currentY += 6;
 
-        if (paymentsList.length > 0) {
-          paymentsList.forEach((p: any) => {
+        if (documentEvents.length > 0) {
+          documentEvents.forEach((event: any) => {
             // Si hay demasiados abonos, también controlamos su salto
             if (currentY > 270) {
               doc.addPage();
               drawSubsequentHeader();
               currentY = 25;
             }
-            const pDate = new Date(p.full_date || p.created_at).toLocaleDateString("es-PE");
-            const paymentMethodText = p.method ? `[${p.method}]` : '';
+            const pDate = event.date ? new Date(event.date).toLocaleDateString("es-PE") : "No registrada";
+            const eventTime = event.type === "waived" && event.date
+              ? new Date(event.date).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit", hour12: false })
+              : event.time;
+            const paymentMethodText = event.method ? `[${event.method}]` : '';
+            const paymentUserText = event.userName ? ` — ${event.userName}` : '';
+            const isWaivedEvent = event.type === "waived";
+            const isDestinationMethod = event.type === "payment" && ["yape", "transferencia"].includes(String(event.method).toLowerCase());
+            const destinationText = event.destination || "No registrado";
+            const eventRowHeight = isWaivedEvent || isDestinationMethod ? 14 : 8;
 
             doc.setFillColor(249, 250, 251);
-            doc.rect(20, currentY, 170, 8, "F");
+            doc.rect(20, currentY, 170, eventRowHeight, "F");
             doc.setFont("Helvetica", "normal");
             doc.setFontSize(9);
             doc.setTextColor(51, 51, 51);
-            doc.text(`Abono realizado el ${pDate} a las ${p.time || 'hrs'} hrs mediante ${paymentMethodText} — `, 23, currentY + 6);
-            doc.setFont("Helvetica", "bold");
-            doc.text(`+ S/ ${parseFloat(p.amount).toFixed(2)}`, 170, currentY + 6);
-            currentY += 8;
+            if (isWaivedEvent) {
+              doc.text(`${event.concept} el ${pDate} a las ${eventTime}`, 23, currentY + 5);
+              doc.text(`${paymentUserText || " — No registrado"}`, 23, currentY + 11);
+              doc.setFont("Helvetica", "bold");
+              doc.text(`S/ ${event.amount.toFixed(2)}`, 187, currentY + 11, { align: "right" });
+            } else if (isDestinationMethod) {
+              doc.text(`${event.concept} el ${pDate} a las ${eventTime}`, 23, currentY + 5);
+              doc.text(`Método: ${event.method} — Destino: ${destinationText}${paymentUserText}`, 23, currentY + 11);
+              doc.setFont("Helvetica", "bold");
+              doc.text(`+ S/ ${event.amount.toFixed(2)}`, 187, currentY + 11, { align: "right" });
+            } else {
+              doc.text(`${event.concept} el ${pDate} a las ${eventTime} mediante ${paymentMethodText}${paymentUserText} — `, 23, currentY + 6);
+              doc.setFont("Helvetica", "bold");
+              doc.text(`+ S/ ${event.amount.toFixed(2)}`, 170, currentY + 6);
+            }
+            currentY += eventRowHeight;
           });
         } else {
           doc.setFont("Helvetica", "italic");
@@ -1532,20 +1661,27 @@ export default function CreditsPage() {
         currentY += 10;
         doc.setFillColor(249, 250, 251);
         doc.setDrawColor(226, 232, 240);
-        doc.rect(120, currentY, 70, 24, "FD");
+        doc.rect(120, currentY, 70, realStatus === "waived" ? 30 : 24, "FD");
 
         doc.setFont("Helvetica", "normal");
         doc.setTextColor(51, 51, 51);
         doc.text("TOTAL VALORIZADO:", 123, currentY + 6);
-        doc.text(`S/ ${parseFloat(lote.total_amount).toFixed(2)}`, 170, currentY + 6);
+        doc.text(`S/ ${totalAmount.toFixed(2)}`, 170, currentY + 6);
 
-        doc.text("TOTAL AMORTIZADO:", 123, currentY + 12);
-        doc.text(`S/ ${parseFloat(lote.paid_amount).toFixed(2)}`, 170, currentY + 12);
+        doc.text("PAGADO REALMENTE:", 123, currentY + 12);
+        doc.text(`S/ ${paidAmount.toFixed(2)}`, 170, currentY + 12);
 
-        doc.line(123, currentY + 15, 187, currentY + 15);
+        if (realStatus === "waived") {
+          doc.text("MONTO CONDONADO:", 123, currentY + 18);
+          doc.text(`S/ ${waivedAmount.toFixed(2)}`, 170, currentY + 18);
+        }
+
+        const separatorY = realStatus === "waived" ? currentY + 21 : currentY + 15;
+        const balanceY = realStatus === "waived" ? currentY + 27 : currentY + 21;
+        doc.line(123, separatorY, 187, separatorY);
         doc.setFont("Helvetica", "bold");
-        doc.text("SALDO DEUDA:", 123, currentY + 21);
-        doc.text(`S/ ${parseFloat(lote.pending_balance).toFixed(2)}`, 170, currentY + 21);
+        doc.text("SALDO DEUDA:", 123, balanceY);
+        doc.text(`S/ ${Math.max(0, pendingBalance).toFixed(2)}`, 170, balanceY);
 
         const cleanFileName = `ESTADO_CUENTA_${clientName.replace(/\s+/g, '_')}_${lote.notes}.pdf`;
         doc.save(cleanFileName);
@@ -1571,8 +1707,19 @@ export default function CreditsPage() {
     });
 
     let paymentsRows = "";
-    paymentsList.forEach((p: any) => {
-      paymentsRows += `<div>• ${new Date(p.full_date || p.created_at).toLocaleDateString("es-PE")} - ${p.method}: S/ ${parseFloat(p.amount).toFixed(2)}</div>`;
+    documentEvents.forEach((event: any) => {
+      const paymentDate = event.date ? new Date(event.date).toLocaleDateString("es-PE") : "No registrada";
+      const paymentTime = event.type === "waived" && event.date
+        ? new Date(event.date).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit", hour12: false })
+        : event.time;
+      const paymentUser = event.userName ? ` — ${event.userName}` : " — No registrado";
+      const isDestinationMethod = event.type === "payment" && ["yape", "transferencia"].includes(String(event.method).toLowerCase());
+      const destinationText = event.destination || "No registrado";
+      paymentsRows += event.type === "waived"
+        ? `<div>• ${event.concept} ${paymentDate} a las ${paymentTime}</div><div class="waived-event-detail">${paymentUser}<span>S/ ${event.amount.toFixed(2)}</span></div>`
+        : isDestinationMethod
+          ? `<div>• ${event.concept} ${paymentDate} a las ${paymentTime}</div><div class="payment-event-detail">Método: ${event.method} — Destino: ${destinationText}${paymentUser}<span>+ S/ ${event.amount.toFixed(2)}</span></div>`
+        : `<div>• ${event.concept} ${paymentDate} ${paymentTime} - ${event.method}${paymentUser}: S/ ${event.amount.toFixed(2)}</div>`;
     });
 
     const htmlContent = `
@@ -1583,6 +1730,8 @@ export default function CreditsPage() {
           .text-center { text-align: center; } .bold { font-weight: bold; }
           .border-dashed { border-bottom: 1px dashed #000; padding: 4px 0; margin-bottom: 4px; }
           table { width: 100%; border-collapse: collapse; } .text-right { text-align: right; }
+          .waived-event-detail { display: flex; justify-content: space-between; padding-left: 3mm; }
+          .payment-event-detail { display: flex; justify-content: space-between; padding-left: 3mm; }
         </style>
       </head>
       <body>
@@ -1599,9 +1748,11 @@ export default function CreditsPage() {
         ${paymentsRows || "<div>No registra abonos.</div>"}
         <div class="border-dashed"></div>
         <table class="bold">
-          <tr><td>TOTAL LOTE:</td><td class="text-right">S/ ${parseFloat(lote.total_amount).toFixed(2)}</td></tr>
-          <tr><td>AMORTIZADO:</td><td class="text-right">S/ ${parseFloat(lote.paid_amount).toFixed(2)}</td></tr>
-          <tr><td>SALDO DEUDA:</td><td class="text-right">S/ ${parseFloat(lote.pending_balance).toFixed(2)}</td></tr>
+          <tr><td>TOTAL LOTE:</td><td class="text-right">S/ ${totalAmount.toFixed(2)}</td></tr>
+          <tr><td>PAGADO REALMENTE:</td><td class="text-right">S/ ${paidAmount.toFixed(2)}</td></tr>
+          ${realStatus === "waived" ? `<tr><td>CONDONADO:</td><td class="text-right">S/ ${waivedAmount.toFixed(2)}</td></tr>` : ""}
+          <tr><td>SALDO DEUDA:</td><td class="text-right">S/ ${Math.max(0, pendingBalance).toFixed(2)}</td></tr>
+          <tr><td>ESTADO:</td><td class="text-right">${statusLabel}</td></tr>
         </table>
       </body>
       </html>
@@ -2492,6 +2643,9 @@ export default function CreditsPage() {
                                 </div>
                               </div>
                               <div className="flex items-center gap-2">
+                                <span className={`text-[9px] font-black px-2 py-0.5 rounded-md ${lote.real_status === "waived" ? "bg-amber-50 text-amber-700 border border-amber-100" : "bg-emerald-50 text-emerald-700 border border-emerald-100"}`}>
+                                  {lote.real_status === "waived" ? "Condonado" : "Pagado"}
+                                </span>
                                 <span className={`text-[9px] font-black px-2 py-0.5 rounded-md ${lote.punctuality === "EXCELENTE" ? "bg-emerald-50 text-emerald-600 border border-emerald-100" : "bg-amber-50 text-amber-600 border border-amber-100"
                                   }`}>
                                   ✨ {lote.punctuality}
@@ -2535,21 +2689,46 @@ export default function CreditsPage() {
                                     💰 Línea de Tiempo de Recaudación en Caja:
                                   </p>
                                   <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                                    {lote.payments && lote.payments.length > 0 ? (
-                                      lote.payments.map((p: any) => (
-                                        <div key={p.id} className="flex justify-between items-center bg-white p-2 rounded-xl border border-emerald-100 text-[10px] shadow-sm">
+                                    {(() => {
+                                      const documentEvents = getDocumentEvents(lote);
+                                      return documentEvents.length > 0 ? (
+                                      documentEvents.map((event: any, eventIndex: number) => {
+                                        const isDestinationMethod = event.type === "payment" && ["yape", "transferencia"].includes(String(event.method).toLowerCase());
+                                        const destinationText = event.destination || "No registrado";
+
+                                        return (
+                                        <div
+                                          key={`${event.type}-${event.sortDate || 'undated'}-${eventIndex}`}
+                                          className={`flex justify-between items-center bg-white p-2 rounded-xl border text-[10px] shadow-sm ${event.type === "waived" ? "border-amber-200 bg-amber-50/40" : "border-emerald-100"}`}
+                                        >
                                           <div>
-                                            <p className="font-bold text-gray-700">{p.description}</p>
-                                            <p className="text-[8px] text-gray-400 font-semibold mt-0.5">
-                                              📅 {p.date} a las {p.time} hrs — <span className="px-1 bg-gray-100 text-gray-600 rounded font-mono uppercase text-[7px]">{p.method}</span>
+                                            <p className={`font-bold ${event.type === "waived" ? "text-amber-800" : "text-gray-700"}`}>
+                                              {event.concept}
                                             </p>
+                                            <p className="text-[8px] text-gray-400 font-semibold mt-0.5">
+                                              📅 {event.date ? new Date(event.date).toLocaleDateString("es-PE") : "Fecha no registrada"} a las {event.time} — {event.userName}
+                                            </p>
+                                            {event.type !== "waived" && (
+                                              <p className="text-[8px] text-gray-400 font-semibold">
+                                                Método: <span className="px-1 bg-gray-100 text-gray-600 rounded font-mono uppercase text-[7px]">{event.method}</span>
+                                              </p>
+                                            )}
+                                            {isDestinationMethod && (
+                                              <p className="text-[8px] text-gray-400 font-semibold">
+                                                Destino: {destinationText}
+                                              </p>
+                                            )}
                                           </div>
-                                          <span className="font-black text-emerald-600 shrink-0 ml-2">+ S/ {parseFloat(p.amount).toFixed(2)}</span>
+                                          <span className={`font-black shrink-0 ml-2 ${event.type === "waived" ? "text-amber-700" : "text-emerald-600"}`}>
+                                            {event.type === "waived" ? "S/" : "+ S/"} {event.amount.toFixed(2)}
+                                          </span>
                                         </div>
-                                      ))
-                                    ) : (
+                                        );
+                                      })
+                                      ) : (
                                       <p className="text-gray-400 text-center py-4 font-medium italic">No se registran transacciones individuales de cobro.</p>
-                                    )}
+                                      );
+                                    })()}
                                   </div>
                                 </div>
 
@@ -2646,16 +2825,25 @@ export default function CreditsPage() {
                             >
                               🖨️ Imprimir Ticket
                             </button>
+                            {lote.real_status !== 'paid' && lote.real_status !== 'waived' && parseFloat(lote.pending_balance) > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => handleWaiveCredit(lote)}
+                                className="flex-1 sm:flex-none bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1"
+                              >
+                                Condonar deuda
+                              </button>
+                            )}
                           </div>
                         </div>
                       ))
                     )}
                   </div>
 
-                  {/* 🟢 SECCIÓN 2: DOCUMENTOS ARCHIVADOS (YA PAGADOS) */}
+                  {/* 🟢 SECCIÓN 2: DOCUMENTOS ARCHIVADOS */}
                   <div className="space-y-3 pt-2">
-                    <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest border-b border-gray-200 pb-1">
-                      ✅ Historial de Lotes Cancelados (S/ 0.00):
+                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest border-b border-gray-200 pb-1">
+                      ✅ Historial de Lotes Cerrados (S/ 0.00):
                     </p>
                     {!selectedAccount?.paid_lotes || selectedAccount.paid_lotes.length === 0 ? (
                       <p className="text-gray-400 italic pl-2">No registra documentos cancelados en el histórico.</p>
@@ -2664,7 +2852,7 @@ export default function CreditsPage() {
                         <div key={lote.id} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                           <div>
                             <p className="font-black text-gray-700 font-mono text-xs">{lote.notes.replace('LOTE-VALORIZADO-', 'LOTE #')}</p>
-                            <p className="text-[10px] text-gray-400 font-semibold mt-0.5">Total Liquidado: <strong className="text-emerald-600">S/ {parseFloat(lote.total_amount).toFixed(2)}</strong> — Concluido en {lote.days_to_pay} días.</p>
+                                    <p className="text-[10px] text-gray-400 font-semibold mt-0.5">{lote.real_status === "waived" ? "Total condonado" : "Total Liquidado"}: <strong className={lote.real_status === "waived" ? "text-amber-600" : "text-emerald-600"}>S/ {parseFloat(lote.total_amount).toFixed(2)}</strong> — Saldo: S/ 0.00.</p>
                           </div>
                           <div className="flex gap-2 w-full sm:w-auto">
                             <button

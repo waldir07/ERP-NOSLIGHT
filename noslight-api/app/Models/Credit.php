@@ -11,11 +11,12 @@ class Credit extends Model
 
     protected $fillable = [
         'sale_id', 'customer_id', 'total_amount', 'paid_amount',
-        'remaining_amount', 'due_date', 'status', 'notes'
+        'remaining_amount', 'due_date', 'status', 'notes', 'waived_at', 'waived_by'
     ];
 
     protected $casts = [
         'due_date' => 'date',
+        'waived_at' => 'datetime',
     ];
 
     public function sale()
@@ -33,9 +34,18 @@ class Credit extends Model
         return $this->hasMany(CreditPayment::class);
     }
 
+    public function waivedBy()
+    {
+        return $this->belongsTo(User::class, 'waived_by');
+    }
+
     // Método helper para actualizar estado
     public function updateStatus()
     {
+        if ($this->status === 'waived') {
+            return;
+        }
+
         if ($this->remaining_amount <= 0) {
             $this->status = 'paid';
         } elseif ($this->due_date->isPast() && $this->remaining_amount > 0) {
