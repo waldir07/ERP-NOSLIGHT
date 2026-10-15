@@ -29,6 +29,7 @@ class ExchangeController extends Controller
 
         $user = $request->user();
         $sale = Sale::findOrFail($request->sale_id);
+        $esCreditoPendiente = $sale->status === 'pending_verification';
 
         // $tienda = Warehouse::firstOrCreate(['code' => 'TIENDA'], ['name' => 'Tienda Principal']);
         // $mermas = Warehouse::firstOrCreate(['code' => 'MERMAS'], ['name' => 'Almacén de Mermas']);
@@ -40,7 +41,7 @@ class ExchangeController extends Controller
         $mermas = Warehouse::where('code', 'MERMAS')->first()
             ?? Warehouse::firstOrCreate(['code' => 'MERMAS'], ['name' => 'Almacén de Mermas']);
 
-        return DB::transaction(function () use ($request, $user, $sale, $tienda, $mermas) {
+        return DB::transaction(function () use ($request, $user, $sale, $tienda, $mermas, $esCreditoPendiente) {
             $totalDevuelto = 0;
             $totalNuevo = 0;
 
@@ -99,7 +100,9 @@ class ExchangeController extends Controller
             foreach ($request->return_items as $item) {
                 if ($item['return_qty'] > 0) {
                     $subtotal = $item['return_qty'] * $item['price'];
-                    $totalDevuelto += $subtotal;
+                    if (!$esCreditoPendiente) {
+                        $totalDevuelto += $subtotal;
+                    }
 
                     // A. Buscamos si ya existe el casillero de stock para evitar duplicar
                     $stock = Stock::where('product_variant_id', $item['product_variant_id'])
@@ -197,7 +200,9 @@ class ExchangeController extends Controller
             foreach ($request->new_items as $item) {
                 if ($item['exchange_qty'] > 0) {
                     $subtotal = $item['exchange_qty'] * $item['price'];
-                    $totalNuevo += $subtotal;
+                    if (!$esCreditoPendiente) {
+                        $totalNuevo += $subtotal;
+                    }
 
                     // A. Buscamos la variante real.
                     // Si tu frontend envía el ID de la variante en "id", lo buscamos por find()
@@ -253,16 +258,23 @@ class ExchangeController extends Controller
             // =======================================================
             // 3. MATEMÁTICA FINANCIERA Y RECALCULO DE TOTALES (CORREGIDO)
             // =======================================================
-            $diferencia = $totalNuevo - $totalDevuelto;
-            $type = 'same_price';
+            $type = $esCreditoPendiente ? 'pending_credit_valuation_exchange' : 'same_price';
             $storeCredit = null;
 
-            // RECALCULO REAL: Actualizamos el total del ticket basado en el movimiento neto
-            // Si es cambio exacto, el total_amount se mantiene equilibrado de forma limpia
-            $nuevoTotalVenta = ($sale->total_amount - $totalDevuelto) + $totalNuevo;
-            $sale->update(['total_amount' => $nuevoTotalVenta]);
+            if ($esCreditoPendiente) {
+                // Los precios de estas líneas son referenciales: la valorización posterior
+                // determinará el importe económico usando la composición ya actualizada.
+                $sale->update([
+                    'total_amount' => $sale->items()->sum('subtotal'),
+                ]);
+                $diferencia = 0;
+            } else {
+                $diferencia = $totalNuevo - $totalDevuelto;
+                $nuevoTotalVenta = ($sale->total_amount - $totalDevuelto) + $totalNuevo;
+                $sale->update(['total_amount' => $nuevoTotalVenta]);
+            }
             // 🟢 REEMPLAZO CORREGIDO PARA LA PÁGINA 7 DE TU CONTROLADOR
-            if ($diferencia > 0) {
+            if (!$esCreditoPendiente && $diferencia > 0) {
                 $type = 'customer_paid_more';
 
                 // 🛡️ Si el frontend envió el array de pagos múltiples estructurado, los procesamos uno a uno
@@ -301,7 +313,7 @@ class ExchangeController extends Controller
                 // Finalmente, incrementamos el dinero ingresado al ticket por el valor neto cobrado
                 $sale->increment('paid_amount', $diferencia);
 
-            } elseif ($diferencia < 0) {
+            } elseif (!$esCreditoPendiente && $diferencia < 0) {
                 $type = 'store_credit_issued';
                 $montoFavor = abs($diferencia);
                 $code = 'VALE-' . strtoupper(Str::random(6));
@@ -316,7 +328,7 @@ class ExchangeController extends Controller
 
                 // Como el total de la venta bajó, el paid_amount excedente se compensa con el vale emitido
                 $sale->update(['paid_amount' => $nuevoTotalVenta]);
-            } else {
+            } elseif (!$esCreditoPendiente) {
                 // SINOPSIS: Si la diferencia es EXACTAMENTE 0 (Cambio Exacto)
                 // Forzamos a que el monto pagado sea exactamente igual al nuevo total de la venta
                 $sale->update(['paid_amount' => $nuevoTotalVenta]);

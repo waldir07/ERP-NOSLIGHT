@@ -582,11 +582,13 @@ export const SalesHistoryPage = () => {
 
 
   const handleProcessExchange = async () => {
-    const totalDevuelto = returnItems.reduce((sum, item) => sum + (item.return_qty * item.price), 0);
-    const totalNuevo = newItems.reduce((sum, item) => sum + (item.exchange_qty * item.price), 0);
-    const diferencia = totalNuevo - totalDevuelto;
+    const esCreditoPendiente = saleToExchange?.status === 'pending_verification';
+    const cantidadDevuelta = returnItems.reduce((sum, item) => sum + item.return_qty, 0);
+    const diferencia = esCreditoPendiente ? 0 :
+      newItems.reduce((sum, item) => sum + (item.exchange_qty * item.price), 0) -
+      returnItems.reduce((sum, item) => sum + (item.return_qty * item.price), 0);
 
-    if (totalDevuelto === 0) {
+    if (cantidadDevuelta === 0) {
       alert("Debes seleccionar al menos un producto para devolver.");
       return;
     }
@@ -604,7 +606,7 @@ export const SalesHistoryPage = () => {
       };
 
       // Si el cliente paga diferencia, le inyectamos la colección estructurada de cobros
-      if (diferencia > 0) {
+      if (!esCreditoPendiente && diferencia > 0) {
         requestBody.payments = exchangePayments.map(p => ({
           method: p.method,
           destination: p.destination,
@@ -625,7 +627,7 @@ export const SalesHistoryPage = () => {
 
       if (res.ok) {
         // Validación inteligente de apertura de gaveta física si hubo efectivo en alguna línea
-        const tieneEfectivo = diferencia > 0 && exchangePayments.some(p => p.method === 'efectivo' && (parseFloat(p.amount) || 0) > 0);
+        const tieneEfectivo = !esCreditoPendiente && diferencia > 0 && exchangePayments.some(p => p.method === 'efectivo' && (parseFloat(p.amount) || 0) > 0);
         if (tieneEfectivo) {
           console.log("🟢 Abriendo gaveta por pago mixto de diferencia...");
           fetch("http://localhost:9090/abrir-gaveta").catch(() => { });
@@ -1223,9 +1225,10 @@ export const SalesHistoryPage = () => {
             {/* Pie del Modal (Matemática Financiera) */}
             {/* ========================================== */}
             {(() => {
-              const totalDevuelto = returnItems.reduce((sum, item) => sum + (item.return_qty * item.price), 0);
-              const totalNuevo = newItems.reduce((sum, item) => sum + (item.exchange_qty * item.price), 0);
-              const diferencia = totalNuevo - totalDevuelto;
+              const esCreditoPendiente = saleToExchange.status === 'pending_verification';
+              const totalDevuelto = esCreditoPendiente ? 0 : returnItems.reduce((sum, item) => sum + (item.return_qty * item.price), 0);
+              const totalNuevo = esCreditoPendiente ? 0 : newItems.reduce((sum, item) => sum + (item.exchange_qty * item.price), 0);
+              const diferencia = esCreditoPendiente ? 0 : totalNuevo - totalDevuelto;
 
               // Calculamos cuánto va pagando la cajera en el desglose múltiple
               const totalPagadoMúltiple = exchangePayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
@@ -1235,6 +1238,12 @@ export const SalesHistoryPage = () => {
                 <div className="bg-white border-t p-5 shrink-0 flex flex-col gap-4">
                   <div className="flex flex-col md:flex-row justify-between items-center gap-4 w-full">
                     <div className="flex flex-wrap gap-6 text-sm items-center">
+                      {esCreditoPendiente ? (
+                        <div>
+                          <p className="text-sm font-bold text-amber-700">Cambio de composición</p>
+                          <p className="text-xs text-gray-500">El crédito se valorizará con los productos actualizados</p>
+                        </div>
+                      ) : <>
                       <div>
                         <p className="text-gray-500 font-bold uppercase text-xs">Devuelve:</p>
                         <p className="text-xl font-black text-red-600">S/ {totalDevuelto.toFixed(2)}</p>
@@ -1253,11 +1262,12 @@ export const SalesHistoryPage = () => {
                           <p className="text-xl font-black text-purple-600">VALE A FAVOR: S/ {Math.abs(diferencia).toFixed(2)}</p>
                         )}
                       </div>
+                      </>}
                     </div>
 
                     <button
                       onClick={handleProcessExchange}
-                      disabled={totalDevuelto === 0 || isProcessingExchange || (diferencia > 0 && Math.abs(faltanteMúltiple) > 0.01)}
+                      disabled={!returnItems.some(item => item.return_qty > 0) || isProcessingExchange || (!esCreditoPendiente && diferencia > 0 && Math.abs(faltanteMúltiple) > 0.01)}
                       className="bg-gray-900 hover:bg-black disabled:bg-gray-300 text-white px-8 py-3 rounded-xl font-bold transition-all shadow-lg flex items-center gap-2 text-base w-full md:w-auto justify-center"
                     >
                       {isProcessingExchange ? 'Procesando...' : 'Procesar Operación'}
@@ -1265,7 +1275,7 @@ export const SalesHistoryPage = () => {
                   </div>
 
                   {/* 💳 SECCIÓN DE PAGO MULTIDIVIDIDO SCON CUENTAS DEL ADMIN (Solo si hay diferencia positiva) */}
-                  {diferencia > 0 && (
+                  {!esCreditoPendiente && diferencia > 0 && (
                     <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200 mt-2">
                       <div className="flex justify-between items-center mb-3">
                         <span className="text-xs font-black text-gray-500 uppercase tracking-wider">Desglose de Pago de Diferencia</span>
